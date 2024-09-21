@@ -52,7 +52,7 @@ async def fetch_album(session, albumID, semaphore):
                 return await response.json()
             else:
                 return None
-            
+             
 async def fecth_track(session, trackID, semaphore):
     async with semaphore:
         async with session.get(track_Url+"/"+str(trackID)) as response:
@@ -60,6 +60,9 @@ async def fecth_track(session, trackID, semaphore):
                 return await response.json()
             else:
                 return None
+def imprimir(songs,datos):
+    for song in songs:
+        print(datos[song])
 songs=[]
 album_Res=[]
 track_Res=[]
@@ -88,19 +91,17 @@ async def main():
         print(f"Propietario: {playlist_info['owner']['display_name']}")
         print(f"Descripción: {playlist_info['description']}")
         print(f"Número de Canciones: {cantSongs}")
-        print("Canciones:")
 
         tasks = []
         tasks_album = []
         tasks_track = []
         for i, track in enumerate(all_tracks):
             track_name = track['track']['name'] 
+            songs.append(track_name)
             datos[track_name]=[track_name , track['track']['album']['album_type'],
                                track['track']['album']['total_tracks'], 
                                track['track']['album']['name'],
                                track['track']['album']['release_date'],
-            #datos[track_name.append([name+" " for name in track['track']['album']['artists'][0]['name']]),
-                               #name for name in track['track']['album']['artists'][0]['name'],
                                [artist['name'] for artist in track['track']['artists']],
                                track['track']['duration_ms'],
                                track['track']['explicit'],
@@ -123,48 +124,19 @@ async def main():
                         track_id = result['data'][0]['id']
                         album_id = result['data'][0]['album']['id']
 
-                        # Realiza las peticiones a Deezer para la canción y el álbum
-                        
                         track_task = fecth_track(session, track_id, semaphore)
                         tasks_track.append(track_task)
                         album_task = fetch_album(session, album_id, semaphore)
                         tasks_album.append(album_task)
 
-                        
-                        
-                        
-                        # Espera ambas peticiones
-                        #track_result, album_result = await asyncio.gather(track_task, album_task)
-                        '''
-                        # Aquí puedes hacer algo con los resultados de la canción y el álbum
-                        #print(f"Track ID: {track_result['id']}, Album ID: {album_result['id']}")
-                        #print("track_result") 
-                        try:
-                            track_result['bpm']
-                            #print(track_result['bpm']) 
-                            track_c += 1
-                        except Exception as e:
-                            print(f"Error: {e}")
-                            track_f += 1
-
-
-                        #print("album_result")
-                        try:
-                            album_result['genres']
-                            #print(album_result['genres'])
-                            album_c += 1
-                        except Exception as e:
-                            print(f"Error: {e}")
-                            album_f += 1
-                        '''
-                        songs.append(result)
+                        #songs.append(result['data'][0]['title'])
 
                         correctas += 1
                     except Exception as e:
                         print(f"Error: {e}")
                         faltantes += 1
                 #print("---------------------------------------------")
-                await asyncio.sleep(espera)
+                await asyncio.sleep(espera)               
                 resA = await asyncio.gather(*tasks_album)               
                 for album_result in resA:
                     try:
@@ -191,6 +163,17 @@ async def main():
                         track_f += 1
                 tasks_track = []
                 await asyncio.sleep(espera)
+        try:
+            for i, song in enumerate(songs):
+                datos[song].append(track_Res[i]['bpm'])
+                datos[song].append(track_Res[i]['gain'])
+
+                datos[song].append([genero['name'] for genero in album_Res[i]['genres']['data']])
+        except Exception as e:
+            print(f"Error: {e}")
+            imprimir(songs,datos)
+                            
+                        
 
     print(f"Correctas fueron {correctas}")
     print(f"Faltantes fueron {faltantes}")
@@ -199,44 +182,15 @@ async def main():
     print(f"Track Correctas fueron {track_c}")
     print(f"Track Faltantes fueron {track_f}")
 
-
-
-    '''
-    response = requests.get(album_url+"/"+str(albumID))
-    if(response.status_code==200):
-        data = response.json()
-        #print(data)
-    '''
-    print("El tamaño final fue de "+str(len(songs)))
-    #print(songs[0])
     end_time = time.time()
     print(f"El tiempo de ejecución del bloque de código fue de {end_time - start_time} segundos")
-    print(datos['Perdóname'])
     return;
-    for rola in songs:
-        params = {
-        'q': rola['title'],
-        'limit': 1 }
-        print(f"La cancion es {rola['title']} y la respuesta es:")
-        response = requests.get(base_url, params=params)
-        
-        if(response.status_code==200):
-            print("response.json() Esta es la peticion del titulo de las rolas")
-        else:
-            print("Error")
-        
-
-
-
-
-
-
 
 asyncio.run(main())
 
 
 print("Fin del programa")
-
+imprimir(songs,datos)
 #res=requests.get(base_url, params=params)
 #print(res.json()['data'])
 #eun-j2p-m52
