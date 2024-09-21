@@ -94,8 +94,19 @@ async def main():
         tasks_album = []
         tasks_track = []
         for i, track in enumerate(all_tracks):
-            track_name = track['track']['name']
-
+            track_name = track['track']['name'] 
+            datos[track_name]=[track_name , track['track']['album']['album_type'],
+                               track['track']['album']['total_tracks'], 
+                               track['track']['album']['name'],
+                               track['track']['album']['release_date'],
+            #datos[track_name.append([name+" " for name in track['track']['album']['artists'][0]['name']]),
+                               #name for name in track['track']['album']['artists'][0]['name'],
+                               [artist['name'] for artist in track['track']['artists']],
+                               track['track']['duration_ms'],
+                               track['track']['explicit'],
+                               track['track']['popularity']]
+                                 
+            
             # Petición de búsqueda de la canción
             task = fetch(session, track_name, semaphore)
 
@@ -200,7 +211,7 @@ async def main():
     #print(songs[0])
     end_time = time.time()
     print(f"El tiempo de ejecución del bloque de código fue de {end_time - start_time} segundos")
-    print(songs[0])
+    print(datos['Perdóname'])
     return;
     for rola in songs:
         params = {
