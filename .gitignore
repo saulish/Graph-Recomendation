@@ -1,4 +1,5 @@
-.env
+app/.env
+app/.cache
 .cache
-__pycache__/
-notas.txt
+app/__pycache__/
+app/notas.txt
