@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Inicio con spotify</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+
+</head>
+<body>
+    <button id=load">XD</button>
+    <table id="playlists">
+        <thead>
+            <tr>
+                <td>Nombre</td>
+                <td>Descripcion</td>
+                <td>Publico</td>
+                <td>Colaborativo</td>
+                <td>Imagen</td>
+                <td>Tracks</td>
+                <td>Analizar</td>
+            </tr>
+        </thead>
+        <tbody id="bodyPlaylist">
+
+        </tbody>
+    </table>
+    <table id="table_datos">
+        <thead>
+            <tr>
+                <td>Nombre</td>
+                <td>Tipo album</td>
+                <td>Total canciones</td>
+                <td>Album</td>
+                <td>Fecha lanzamiento</td>
+                <td>Artista</td>
+                <td>Duracion</td>
+                <td>Es explicita?</td>
+                <td>Popularidad</td>
+                <td>Rank Dezzer</td>
+                <td>BPM</td>
+                <td>Gain</td>
+                <td>Generos</td>
+            </tr>
+        </thead>
+        <tbody id="bodyDatos">
+
+        </tbody>
+
+    </table>
+    
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

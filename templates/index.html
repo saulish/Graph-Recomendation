@@ -4,8 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Inicio con spotify</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+
 </head>
 <body>
-    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <button id="iniciar">Iniciar sesion en spotify</button>
+    <table id="tabla">
+
+    <script src="{{ url_for('static', filename='js/index.js') }}"></script>
 </body>
 </html>

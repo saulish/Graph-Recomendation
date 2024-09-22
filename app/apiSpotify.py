@@ -1,11 +1,12 @@
 import asyncio
 import time
 import math
-from conect import getSpotifyInstance, playlist, base_url, album_url, artist_url, track_Url
+from app.conect import getSpotifyInstance, playlist, base_url, album_url, artist_url, track_Url
 import aiohttp
 import requests
 start_time = time.time()
 sp = getSpotifyInstance()
+
 datos={}
 playlist_id = playlist.split('/')[-1]
 # Obtiene la información de la playlist
@@ -25,8 +26,7 @@ def get_all_tracks(playlist_id):
 playlist_info = sp.playlist(playlist_id)
 # Obtiene todas las pistas de la playlist
 all_tracks = get_all_tracks(playlist_id)
-print(all_tracks[0])
-#print(all_tracks[0]['track'])
+
 cantSongs=len(all_tracks)
 
 
@@ -186,11 +186,15 @@ async def main():
     print(f"El tiempo de ejecución del bloque de código fue de {end_time - start_time} segundos")
     return;
 
-asyncio.run(main())
+
+def getGrafo():
+    asyncio.run(main())
 
 
-print("Fin del programa")
-imprimir(songs,datos)
-#res=requests.get(base_url, params=params)
-#print(res.json()['data'])
+    print("Fin del programa")
+    imprimir(songs,datos)
+    return songs,datos
+
+
+
 #eun-j2p-m52
