@@ -4,15 +4,8 @@ import math
 from app.conect import getSpotifyInstance, playlist, base_url, album_url, artist_url, track_Url
 import aiohttp
 import requests
-start_time = time.time()
-sp = getSpotifyInstance()
 
-datos={}
-playlist_id = playlist.split('/')[-1]
-# Obtiene la información de la playlist
-
-# Obtiene la información de la playlist
-def get_all_tracks(playlist_id):
+def get_all_tracks(playlist_id, sp):
     tracks = []
     results = sp.playlist_tracks(playlist_id, limit=100)
     tracks.extend(results['items'])
@@ -23,11 +16,8 @@ def get_all_tracks(playlist_id):
     
     return tracks
 
-playlist_info = sp.playlist(playlist_id)
-# Obtiene todas las pistas de la playlist
-all_tracks = get_all_tracks(playlist_id)
 
-cantSongs=len(all_tracks)
+
 
 
 async def imprimir(songs):
@@ -63,10 +53,9 @@ async def fecth_track(session, trackID, semaphore):
 def imprimir(songs,datos):
     for song in songs:
         print(datos[song])
-songs=[]
-album_Res=[]
-track_Res=[]
-async def main():
+
+async def main(playlist_id, sp, datos, all_tracks, playlist_info,album_Res, track_Res, songs):
+    cantSongs=len(all_tracks)
     faltantes = 0
     correctas = 0
     album_c = 0
@@ -182,13 +171,19 @@ async def main():
     print(f"Track Correctas fueron {track_c}")
     print(f"Track Faltantes fueron {track_f}")
 
-    end_time = time.time()
-    print(f"El tiempo de ejecución del bloque de código fue de {end_time - start_time} segundos")
+
     return;
 
 
-def getGrafo():
-    asyncio.run(main())
+def getGrafo(playlist_id, sp, playlist_info):
+    datos={}
+    songs=[]
+    album_Res=[]
+    track_Res=[]
+
+    all_tracks = get_all_tracks(playlist_id, sp)
+
+    asyncio.run(main(playlist_id, sp, datos, all_tracks, playlist_info, album_Res, track_Res, songs))
 
 
     print("Fin del programa")
@@ -197,4 +192,3 @@ def getGrafo():
 
 
 
-#eun-j2p-m52

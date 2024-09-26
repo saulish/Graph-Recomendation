@@ -1,6 +1,6 @@
 from flask import Blueprint, render_template, jsonify, request, redirect, url_for, session
-from app.conect import login, getToken, refrescarToken, getPlaylist
-from app.apiSpotify import getGrafo
+from app.conect import login, getToken, refrescarToken, getPlaylist, getDatos
+
 # Define el blueprint
 main = Blueprint('main', __name__)
 
@@ -44,8 +44,17 @@ def callback():
 def playlists():
     token_info = session.get('token_info', None)
     if not token_info:
-        return redirect(url_for('index'))
-
-    
+        return redirect(url_for('index'))  
     playlists = getPlaylist(token_info)
     return jsonify(playlists)  
+
+
+@main.route('/analizarPlyalist')
+def analizar():
+    token_info = session.get('token_info', None)
+    if not token_info:
+        return redirect(url_for('index'))   
+    id = request.args.get('id')
+    print(f'ID: {id}')
+    songs,datos=getDatos(token_info,id)
+    return jsonify({'songs': songs, 'datos': datos})

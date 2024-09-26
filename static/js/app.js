@@ -47,8 +47,13 @@ async function setDatos() {
 
     });
 }
-function analizarPlaylist(id){
+async function analizarPlaylist(id){
     alert('Analizando playlist '+id);
+    const url=window.location.href.replace('menu','');
+    await fetch(url+'analizarPlyalist?id='+encodeURIComponent(id))
+    .then(response => response.json())
+    .then(data => console.log(data))
+    .catch(error => console.error('Error:', error));
 }
 
 

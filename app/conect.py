@@ -1,3 +1,17 @@
+from spotipy.oauth2 import CacheHandler
+
+class CustomCacheHandler(CacheHandler):
+    def __init__(self):
+        self.token_cache = None  # El token solo se almacena en memoria
+
+    def get_cached_token(self):
+        return self.token_cache
+
+    def save_token_to_cache(self, token_info):
+        self.token_cache = token_info
+
+
+
 from flask import session, redirect, url_for
 import spotipy
 import requests
@@ -22,9 +36,11 @@ album_url = 'https://api.deezer.com/album'
 
 
 
-sp_oauth = SpotifyOAuth(client_id=clientID, client_secret=secretID, redirect_uri=redirect_url, scope='playlist-read-private')
+#sp_oauth = SpotifyOAuth(client_id=clientID, client_secret=secretID, redirect_uri=redirect_url, scope='playlist-read-private')
 
 def getSpotifyInstance():
+    sp_oauth = SpotifyOAuth(client_id=clientID, client_secret=secretID, redirect_uri=redirect_url, 
+                        scope='playlist-read-private',cache_handler=CustomCacheHandler())
     # Obtiene el token de acceso del usuario (abre automáticamente una ventana de inicio de sesión)
     token_info = sp_oauth.get_access_token()
     access_token = token_info['access_token']
@@ -33,25 +49,46 @@ def getSpotifyInstance():
     return spotipy.Spotify(auth=access_token)
 
 def getPlaylist(token_info):
+    #print(f'TOKEN EN GET: {token_info}')
     if not token_info:
         return redirect(url_for('index'))
-
     sp = spotipy.Spotify(auth=token_info['access_token'])
     playlists = sp.current_user_playlists()
     return playlists
 
+def getDatos(token_info, playlist_id):
+    #print(f'TOKEN EN ANALIZAR: {token_info}')
+
+    if not token_info:
+        return redirect(url_for('index'))
+    sp = spotipy.Spotify(auth=token_info['access_token'])
+
+
+    from app.apiSpotify import getGrafo
+    #print(sp.playlist('1pkkHHc9IFUbvxMP7Ae3tH'))
+
+
+    playlist_info = sp.playlist(playlist_id)
+    songs,datos = getGrafo(playlist_id, sp, playlist_info)
+    return songs,datos
 
 def login():
+    sp_oauth = SpotifyOAuth(client_id=clientID, client_secret=secretID, redirect_uri=redirect_url, 
+                        scope='playlist-read-private', cache_handler=CustomCacheHandler())
     auth_url = sp_oauth.get_authorize_url()
     return auth_url
 
 def getToken(code):
+    sp_oauth = SpotifyOAuth(client_id=clientID, client_secret=secretID, redirect_uri=redirect_url, 
+                        scope='playlist-read-private', cache_handler=CustomCacheHandler())
     token_info = sp_oauth.get_access_token(code)
     session['token_info'] = token_info
     return token_info
 
 
 def refrescarToken(token_info):
+    sp_oauth = SpotifyOAuth(client_id=clientID, client_secret=secretID, redirect_uri=redirect_url, 
+                        scope='playlist-read-private', cache_handler=CustomCacheHandler())
     if sp_oauth.is_token_expired(token_info):
         token_info = sp_oauth.refresh_access_token(token_info['refresh_token'])
         session['token_info'] = token_info
