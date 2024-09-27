@@ -52,9 +52,37 @@ async function analizarPlaylist(id){
     const url=window.location.href.replace('menu','');
     await fetch(url+'analizarPlyalist?id='+encodeURIComponent(id))
     .then(response => response.json())
-    .then(data => console.log(data))
+    .then(data => 
+        cambiarTabla(data)
+
+    )
     .catch(error => console.error('Error:', error));
 }
 
+function cambiarTabla(data){
+    document.getElementById('playlists').style.display='none'
+    document.getElementById('table_datos').style.display='block'
+    const datos=data['datos'];
+    for (const songTitle in datos) {
+        if (datos.hasOwnProperty(songTitle)) {
+            const songData = datos[songTitle];
+            //console.log(songData);
+            const row=document.createElement('tr');
+            for(let i=0;i<13;i++){
+                const td=document.createElement('td');
+                if(i==11){
+                    console.log(songData[i]);
+                }
+                td.textContent=songData[i];
+            
+                row.appendChild(td);
+                
+    
+            }
+            document.getElementById('bodyDatos').appendChild(row);
 
+        }
+    }
+
+}
 main();

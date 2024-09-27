@@ -112,7 +112,7 @@ async def main(playlist_id, sp, datos, all_tracks, playlist_info,album_Res, trac
                     try:
                         track_id = result['data'][0]['id']
                         album_id = result['data'][0]['album']['id']
-
+                        
                         track_task = fecth_track(session, track_id, semaphore)
                         tasks_track.append(track_task)
                         album_task = fetch_album(session, album_id, semaphore)
@@ -156,7 +156,7 @@ async def main(playlist_id, sp, datos, all_tracks, playlist_info,album_Res, trac
             for i, song in enumerate(songs):
                 datos[song].append(track_Res[i]['bpm'])
                 datos[song].append(track_Res[i]['gain'])
-
+                datos[song].append(track_Res[i]['rank'])
                 datos[song].append([genero['name'] for genero in album_Res[i]['genres']['data']])
         except Exception as e:
             print(f"Error: {e}")
