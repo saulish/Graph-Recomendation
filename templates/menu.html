@@ -7,8 +7,17 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
 
 </head>
+<header>
+    <h3>Graph recomendation</h3>
+    <nav>
+        <ul>
+            <li><a href="/"><h4>Inicio</h4></a></li>
+            <li><a href="/menu"><h4>Playlists</h4></a></li>
+            <li><a href="/logout"><h4>Cerrar sesion</h4></a></li>
+        </ul>
+</header>
 <body>
-    <button id=load">XD</button>
+    <h1>Bienvenid@, por favor selecciona una playlist para poder analizarla</h1>
     <table id="playlists">
         <thead>
             <tr>

@@ -4,12 +4,22 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Inicio con spotify</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/index.css') }}">
 
 </head>
+<header>
+    <h3>Graph recomendation</h3>
+    <nav>
+        <ul>
+            <li><a href="/"><h4>Inicio</h4></a></li>
+            <li><a href="/menu"><h4>Playlists</h4></a></li>
+            <li><a href="/logout"><h4>Cerrar sesion</h4></a></li>
+        </ul>
+</header>
 <body>
-    <button id="iniciar">Iniciar sesion en spotify</button>
-    <table id="tabla">
+    <h1>Bienvid@ a Graph recomendation</h1>
+    <h2>Por favor, inicia sesion con tu cuenta de spotify para comenzar</h2>
+    <button id="iniciar">Conectar con Spotify</button>
 
     <script src="{{ url_for('static', filename='js/index.js') }}"></script>
 </body>
