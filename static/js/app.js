@@ -54,13 +54,19 @@ async function analizarPlaylist(id){
     .then(response => response.json())
     .then(data => 
         cambiarTabla(data)
-
     )
     .catch(error => console.error('Error:', error));
 }
 
 function cambiarTabla(data){
     document.getElementById('playlists').style.display='none'
+    document.getElementById('back').style.display='block'
+    document.getElementById('back').addEventListener('click',function(){
+        document.getElementById('bodyDatos').innerHTML='';
+        document.getElementById('table_datos').style.display='none';
+        document.getElementById('back').style.display='none';
+        document.getElementById('playlists').style.display='block';
+    });
     document.getElementById('table_datos').style.display='block'
     const datos=data['datos'];
     for (const songTitle in datos) {

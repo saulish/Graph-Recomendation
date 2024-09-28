@@ -12,7 +12,9 @@ def index():
 
 @main.route('/menu')
 def menu():
-    # Aquí renderizas la página del menú
+    token_info = session.get('token_info', None)
+    if not token_info:
+        return redirect(url_for('main.index'))  
     return render_template('menu.html')
 
 @main.route('/saludar')
@@ -44,11 +46,20 @@ def callback():
 def playlists():
     token_info = session.get('token_info', None)
     if not token_info:
-        return redirect(url_for('index'))  
+        return redirect(url_for('main.index'))  
     playlists = getPlaylist(token_info)
     return jsonify(playlists)  
 
+@main.route('/logout')
+def logout():
+    token_info = session.get('token_info', None)
+    if not token_info:
+        return redirect(url_for('main.index'))  
+    
+    session.pop('token_info', None)
 
+    session.clear()   
+    return redirect(url_for('main.index')) 
 @main.route('/analizarPlyalist')
 def analizar():
     token_info = session.get('token_info', None)

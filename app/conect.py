@@ -74,7 +74,7 @@ def getDatos(token_info, playlist_id):
 
 def login():
     sp_oauth = SpotifyOAuth(client_id=clientID, client_secret=secretID, redirect_uri=redirect_url, 
-                        scope='playlist-read-private', cache_handler=CustomCacheHandler())
+                        scope='playlist-read-private', show_dialog=True,cache_handler=CustomCacheHandler())
     auth_url = sp_oauth.get_authorize_url()
     return auth_url
 
