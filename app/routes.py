@@ -7,7 +7,7 @@ main = Blueprint('main', __name__)
 # Define las rutas
 @main.route('/')
 def index():
-    print("Hola pendejos soy el anticristo 2006")
+    print("Hola pendejos soy el anticristo 2007")
     return render_template('index.html')
 
 @main.route('/menu')
