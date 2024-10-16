@@ -5,6 +5,8 @@
 }
 body{
     background-color: #16423C;
+    width:100%;
+    height:100%;
 }
 header{
     display: flex;
@@ -85,4 +87,15 @@ button:hover{
 }
 #table_datos, #back{
     display: none;
+}
+#cy {
+    width: 100%;
+    height: 100%;
+    border: 1px solid black;
+}
+#network {
+    display: none;
+    width: 100%;
+    height: 100vh; /* Altura completa de la ventana */
+    border: 1px solid lightgray;
 }

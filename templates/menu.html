@@ -38,6 +38,7 @@
     <table id="table_datos">      
         <thead>
             <tr>
+                <td>#</td>
                 <td>Nombre</td>
                 <td>Tipo album</td>
                 <td>Total canciones</td>
@@ -58,7 +59,9 @@
         </tbody>
 
     </table>
-    
+    <div id="network"></div>
+    <script src="https://unpkg.com/vis-network@9.1.2/dist/vis-network.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/graphlib/2.1.8/graphlib.min.js"></script>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
 </html>

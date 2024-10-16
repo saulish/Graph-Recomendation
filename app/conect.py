@@ -65,11 +65,10 @@ def getDatos(token_info, playlist_id):
 
 
     from app.apiSpotify import getGrafo
-    #print(sp.playlist('1pkkHHc9IFUbvxMP7Ae3tH'))
 
 
     playlist_info = sp.playlist(playlist_id)
-    songs,datos = getGrafo(playlist_id, sp, playlist_info)
+    return getGrafo(playlist_id, sp, playlist_info)
     return songs,datos
 
 def login():

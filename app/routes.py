@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, jsonify, request, redirect, url_for, session
+from flask import Blueprint, render_template, jsonify, request, redirect, url_for, session, Response
 from app.conect import login, getToken, refrescarToken, getPlaylist, getDatos
 
 # Define el blueprint
@@ -60,6 +60,7 @@ def logout():
 
     session.clear()   
     return redirect(url_for('main.index')) 
+
 @main.route('/analizarPlyalist')
 def analizar():
     token_info = session.get('token_info', None)
@@ -67,5 +68,8 @@ def analizar():
         return redirect(url_for('index'))   
     id = request.args.get('id')
     print(f'ID: {id}')
+
+    return Response(getDatos(token_info,id), mimetype='application/json')
+
     songs,datos=getDatos(token_info,id)
     return jsonify({'songs': songs, 'datos': datos})
