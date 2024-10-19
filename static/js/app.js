@@ -49,7 +49,7 @@ async function setDatos() {
 }
 async function analizarPlaylist(id, total){
     let grafo=[];
-    let datosCanciones;
+    let datosCanciones={};
     let listaNombres=[];    
     let lastSong=-1;
     const graph = new graphlib.Graph({ directed: false });
@@ -97,10 +97,9 @@ async function analizarPlaylist(id, total){
             }
             
             // Decodificar y agregar los datos al HTML
-            
             const chunk = JSON.parse(decoder.decode(value, { stream: true }));
-            listaNombres=chunk['songs'];
-            datosCanciones=chunk['datos'];
+            listaNombres=listaNombres.concat(chunk['songs']);
+            datosCanciones = {...datosCanciones, ...chunk['datos']};
             cambiarTabla(datosCanciones);
             for(i=listaNombres.length-1;i>lastSong;i--){
                 for(j=i-1;j>-1;j--){
@@ -195,12 +194,17 @@ function cambiarTabla(datos){
     document.getElementById('back').style.display='block'
     document.getElementById('back').addEventListener('click',function(){
         grafo=[];
+        datosCanciones={};
+        listaNombres=[];
+        lastSong=-1;
+        document.getElementById('network').style.display='none';
         document.getElementById('bodyDatos').innerHTML='';
         document.getElementById('table_datos').style.display='none';
         document.getElementById('back').style.display='none';
         document.getElementById('playlists').style.display='block';
     });
     document.getElementById('table_datos').style.display='block'
+
     let cont=1;
     for (const songTitle in datos) {
         if (datos.hasOwnProperty(songTitle)) {

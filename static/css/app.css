@@ -34,7 +34,7 @@ h1,h2{
     font-size: 200%;
 }
 h2{
-    font-size: 30px;
+    font-size: 300%;
 }
 h3{
     text-align: left;
@@ -59,7 +59,7 @@ table{
 thead,tbody{
     font-family: 'Franklin Gothic Medium', 'Arial Narrow', Arial, sans-serif;
     color: #C4DAD2;
-    font-size: 125%;
+    font-size: 100%;
 }
 td{
     border: 1px solid white;
@@ -96,6 +96,6 @@ button:hover{
 #network {
     display: none;
     width: 100%;
-    height: 100vh; /* Altura completa de la ventana */
+    height: 80vh;
     border: 1px solid lightgray;
-}
+}   

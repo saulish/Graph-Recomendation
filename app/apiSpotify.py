@@ -63,7 +63,7 @@ async def main(playlist_id, sp, datos, all_tracks, playlist_info, album_Res, tra
     track_f = 0
     max_concurrent_requests = math.ceil(len(all_tracks) / 10)
     espera = (max_concurrent_requests / 10) / 1.2
-    espera = 4  # tiempo de espera fijo para simplificar
+    espera = 1.5 # tiempo de espera fijo para simplificar
 
     semaphore = asyncio.Semaphore(max_concurrent_requests)
 
@@ -147,8 +147,8 @@ def getGrafo(playlist_id, sp, playlist_info):
     total_tracks = len(all_tracks)
 
     # Procesa las canciones en lotes de 15
-    for i in range(0, total_tracks, 15):
-        tmpTracks = all_tracks[i:i+15]
+    for i in range(0, total_tracks, 6):
+        tmpTracks = all_tracks[i:i+6]
         asyncio.run(main(playlist_id, sp, datos, tmpTracks, playlist_info, album_Res, track_Res, songs))
         yield json.dumps(
             {
@@ -156,7 +156,8 @@ def getGrafo(playlist_id, sp, playlist_info):
                 'datos': datos
             }
         ) + "\n"  # Realiza el yield tras cada lote de 15 canciones
-    
+        songs = []
+        datos = {}
     print("Fin del procesamiento de todas las canciones.")
 
 
