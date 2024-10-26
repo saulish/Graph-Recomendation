@@ -47,12 +47,15 @@ async function setDatos() {
 
     });
 }
+function numeroRandom(min, max) {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+}
 async function analizarPlaylist(id, total){
     let grafo=[];
     let datosCanciones={};
     let listaNombres=[];    
     let lastSong=-1;
-    const graph = new graphlib.Graph({ directed: false });
+    const graph = new graphlib.Graph();
 
     alert('Analizando playlist '+id);
     for(i=0;i<total;i++){
@@ -67,32 +70,131 @@ async function analizarPlaylist(id, total){
     fetch(url+'analizarPlyalist?id='+encodeURIComponent(id)).then(response => {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
+
+        function getPath(targetNode, shortestPaths) {
+            let path = [];
+            let currentNode = targetNode;
         
+            while (currentNode) {
+                path.unshift(currentNode);
+                currentNode = shortestPaths[currentNode].predecessor;
+            }
+        
+            return path;
+        }
         function processStream({ done, value }) {
+            
             if (done) {
                 console.log('No more data');
                 console.log(grafo)
                 document.getElementById('bodyDatos').innerHTML='';
                 document.getElementById('table_datos').style.display='none';
                 document.getElementById('network').style.display='block';
+                /*
                 console.log("Nodos:", graph.nodes());
                 console.log("Aristas:");
                 graph.edges().forEach(edge => {
                     console.log(`${edge.v} --(${graph.edge(edge.v, edge.w)})--> ${edge.w}`);
-                });
-                        // Convertir a formato de Vis.js
-                const nodes = graph.nodes().map(node => ({ id: node, label: node }));
-                const edges = graph.edges().map(edge => ({
-                    from: edge.v,
-                    to: edge.w,
-                    label: String(graph.edge(edge.v, edge.w))  // Peso de la arista
-                }));
+                });*/
+                // Crear vis.DataSet para nodos y aristas
+                let nodes = new vis.DataSet(
+                    graph.nodes().map(node => ({
+                        id: node,
+                        label: node,
+                        color: '#C4DAD2'  // Color de los nodos por defecto
+                    }))
+                );
+                
+                let edges = new vis.DataSet(
+                    graph.edges().map(edge => ({
+                        from: edge.v,
+                        to: edge.w,
+                        label: String(graph.edge(edge.v, edge.w)),
+                        color: { color: '#FFFFFF' }  // Color de las aristas por defecto
+                    }))
+                );
 
-                const data = { nodes: new vis.DataSet(nodes), edges: new vis.DataSet(edges) };
-                const options = {};
+
+                // Función para resaltar el camino en Vis.js
+                function highlightPath(pathNodes, duration = 5000) {
+                    // Guardar los colores originales de nodos y aristas
+                    const originalNodes = pathNodes.map(node => ({
+                        id: node,
+                        color: nodes.get(node).color || '#C4DAD2'
+                    }));
+                
+                    const originalEdges = [];
+                    for (let i = 0; i < pathNodes.length - 1; i++) {
+                        const edgeId = edges.get({
+                            filter: (item) => item.from === pathNodes[i] && item.to === pathNodes[i + 1]
+                        })[0].id;
+                        originalEdges.push({
+                            id: edgeId,
+                            color: { color: '#FFFFFF' }
+                        });
+                    }
+                
+                    // Cambiar colores para resaltar
+                    const updatedNodes = pathNodes.map(node => ({ id: node, color: '#6CD1AC' }));
+                    const updatedEdges = originalEdges.map(edge => ({
+                        ...edge,
+                        color: { color: '#6CD1AC' }
+                    }));
+                
+                    // Aplicar los cambios
+                    nodes.update(updatedNodes);
+                    edges.update(updatedEdges);
+                
+                    // Restaurar colores originales después de 'duration' milisegundos
+                    setTimeout(() => {
+                        nodes.update(originalNodes);
+                        edges.update(originalEdges);
+                        network.setData({ nodes, edges });  // Refrescar la visualización
+                    }, duration);
+                }
+
+
+
+
+                const data = { nodes: nodes, edges: edges };
+                const options = {
+                    nodes: {
+                        color: '#C4DAD2'
+                    },
+                    edges: {
+                        color: '#FFFFFF',
+                        width: 2,
+                        font: {
+                            color: '#000000',
+                            size: 12,  // Ajusta el tamaño de la etiqueta si deseas
+                            align: 'horizontal'
+                        }
+                    },
+                    physics: {
+                        enabled: true
+                    }
+                };
 
                 // Inicializar Vis.js y renderizar el grafo
                 const network = new vis.Network(document.getElementById('network'), data, options);
+                network.on('click', function(params) {
+                    if (params.nodes.length > 0) {
+                        console.log(params.nodes[0]);
+                        const shortestPaths = graphlib.alg.dijkstra(graph, params.nodes[0]);
+                        const popObjetivo=numeroRandom(0,populares.length-1);
+                        console.log("Cancion popular: "+populares[popObjetivo]);
+                        console.log(shortestPaths[populares[popObjetivo]]);
+                        const path = getPath(populares[popObjetivo], shortestPaths);
+                        // Construir aristas a partir del camino
+                        let edges = [];
+                        for (let i = 0; i < path.length - 1; i++) {
+                            edges.push({ from: path[i], to: path[i + 1] });
+                        }
+                        highlightPath(path);
+
+
+                    }
+                });
                 return;
             }
             
@@ -103,12 +205,12 @@ async function analizarPlaylist(id, total){
             cambiarTabla(datosCanciones);
             for(i=listaNombres.length-1;i>lastSong;i--){
                 for(j=i-1;j>-1;j--){
-                    graph.setNode(listaNombres[i]);
-                    graph.setNode(listaNombres[j]);
                     const peso=compararCancion(datosCanciones[listaNombres[i]],datosCanciones[listaNombres[j]]);
                     if(peso<40){
                         continue;
                     }
+                    graph.setNode(listaNombres[i]);
+                    graph.setNode(listaNombres[j]);         
                     graph.setEdge(listaNombres[i], listaNombres[j], peso);
                     graph.setEdge(listaNombres[j], listaNombres[i], peso);
 
@@ -206,14 +308,19 @@ function cambiarTabla(datos){
     document.getElementById('table_datos').style.display='block'
 
     let cont=1;
+    populares=[];
     for (const songTitle in datos) {
         if (datos.hasOwnProperty(songTitle)) {
             const songData = datos[songTitle];
+            if(songData[8]>70){
+                populares.push(songTitle);
+            }
             const row=document.createElement('tr');
             const tdCont=document.createElement('td');
             tdCont.textContent=cont;
             row.appendChild(tdCont);
             for(let i=0;i<13;i++){
+
                 const td=document.createElement('td');
                 td.textContent=songData[i];       
                 row.appendChild(td);           
@@ -224,7 +331,10 @@ function cambiarTabla(datos){
 
         }
     }
+    console.log("Populares");
+    console.log(populares);
 
 }
 main();
 
+let populares=[];
