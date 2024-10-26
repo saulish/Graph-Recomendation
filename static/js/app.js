@@ -179,25 +179,85 @@ async function analizarPlaylist(id, total){
                 const network = new vis.Network(document.getElementById('network'), data, options);
                 network.on('click', function(params) {
                     if (params.nodes.length > 0) {
-                        console.log(params.nodes[0]);
                         const shortestPaths = graphlib.alg.dijkstra(graph, params.nodes[0]);
                         const popObjetivo=numeroRandom(0,populares.length-1);
-                        console.log("Cancion popular: "+populares[popObjetivo]);
-                        console.log(shortestPaths[populares[popObjetivo]]);
+                        if(shortestPaths[populares[popObjetivo]]==undefined || shortestPaths[populares[popObjetivo]].distance==Infinity){
+                            alert('No se puede llegar a la cancion '+populares[popObjetivo]);
+                            return;
+                        }
+                        alert("Calculando camino de "+params.nodes[0]+" a "+populares[popObjetivo]);
                         const path = getPath(populares[popObjetivo], shortestPaths);
+                        showWay(path);
                         // Construir aristas a partir del camino
                         let edges = [];
                         for (let i = 0; i < path.length - 1; i++) {
                             edges.push({ from: path[i], to: path[i + 1] });
                         }
-                        highlightPath(path);
+
+                        //highlightPath(path);
 
 
                     }
                 });
+                function showWay(path) {
+                    document.getElementById('netRecomendation').innerHTML = '';
+                    document.getElementById('netRecomendation').style.display = 'block';
+                    document.getElementById('network').style.width = '50%';
+                    
+                    // Crear nodos resaltados
+                    const updatedNodes = path.map(node => ({ id: node, color: '#6CD1AC', label: node }));
+                    
+                    // Crear aristas resaltadas a partir del camino
+                    const updatedEdges = [];
+                    for (let i = 0; i < path.length - 1; i++) {
+                        updatedEdges.push({
+                            from: path[i],
+                            to: path[i + 1],
+                            color: { color: '#6CD1AC' },
+                            width: 2  // Ajusta el ancho si quieres resaltar más
+                        });
+                    }
+                
+                    // Inicializar el nuevo conjunto de datos para el grafo
+                    const data = {
+                        nodes: new vis.DataSet(updatedNodes),
+                        edges: new vis.DataSet(updatedEdges)
+                    };
+                
+                    // Configuración de opciones
+                    const options = {
+                        nodes: {
+                            color: '#C4DAD2'
+                        },
+                        edges: {
+                            color: '#FFFFFF',
+                            width: 2,
+                            font: {
+                                color: '#000000',
+                                size: 12,
+                                align: 'horizontal'
+                            }
+                        },
+                        physics: {
+                            enabled: true
+                        }
+                    };
+                
+                    
+                    new vis.Network(document.getElementById('netRecomendation'), data, options);
+                    setTimeout(() => {
+                        document.getElementById('netRecomendation').innerHTML = '';
+                        document.getElementById('netRecomendation').style.display = 'none';
+                        document.getElementById('network').style.width = '100%';
+                    }, 5000);
+                }
+                
+                
                 return;
+
+                
             }
-            
+
             // Decodificar y agregar los datos al HTML
             const chunk = JSON.parse(decoder.decode(value, { stream: true }));
             listaNombres=listaNombres.concat(chunk['songs']);

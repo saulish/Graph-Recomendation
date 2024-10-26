@@ -99,3 +99,9 @@ button:hover{
     height: 80vh;
     border: 1px solid lightgray;
 }   
+#netRecomendation {
+    display: none;
+    width: 50%;
+    height: 80vh;
+    border: 1px solid lightgray;
+}   
