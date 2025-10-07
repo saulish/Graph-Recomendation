@@ -1,5 +1,6 @@
 app/.env
 app/.cache
 .cache
-app/__pycache__/
+**/__pycache__/
 app/notas.txt
+flask_session

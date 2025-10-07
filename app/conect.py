@@ -23,7 +23,8 @@ load_dotenv()
 
 clientID = os.getenv('SPOTIFY_API_KEY')
 secretID = os.getenv('SPOTIFY_API_SECRET')
-redirect_url = os.getenv('REDIRECT')
+PORT = os.getenv('PORT')
+redirect_url = "http://127.0.0.1:"+str(PORT)+"/callback"
 
 playlist="https://open.spotify.com/playlist/4PsCeD3yIyiN3YhobkOv4R" #40 CANCIONES         2 segs       17 segs
 #playlist="https://open.spotify.com/playlist/1pkkHHc9IFUbvxMP7Ae3tH" #75 CANCIONES        9 segs        32 segs
