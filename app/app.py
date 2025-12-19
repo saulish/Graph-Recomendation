@@ -21,12 +21,15 @@ class App:
         async def start(request: Request):
             try:
                 token_info = getTokenInfo(request)
-                if token_info:
+                if token_info:  # If the token exists, send the logged to redirect the user to the app
                     return JSONResponse({"ok": True, "logged": True}, status_code=200)
+                else:
+                    url = login()
+                    return {"ok": True, "logged": False, "auth_url": url}
+
             except Exception as e:
                 print("Error in the token_info variable")
-            url = login()
-            return {"ok": True, "logged": False, "auth_url": url}
+                return JSONResponse({"ok": False, "message": str(e)})
 
         @app.get('/callback')
         async def callback(request: Request):

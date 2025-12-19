@@ -4,12 +4,13 @@ from starlette.middleware.sessions import SessionMiddleware
 from dotenv import load_dotenv
 
 load_dotenv()
-
+BACKEND_PORT = os.getenv('BACK_PORT')
+FRONTEND_PORT = os.getenv('FRONT_PORT')
 
 def configApp(app):
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://127.0.0.1:5500"],
+        allow_origins=[f"http://127.0.0.1:{FRONTEND_PORT}"],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -18,7 +19,7 @@ def configApp(app):
         SessionMiddleware,
         secret_key="miau",
         session_cookie="session",
-        same_site="none",  # only dev
+        same_site="lax",  # only dev
         https_only=False  # only dev
     )
 
@@ -26,7 +27,8 @@ def configApp(app):
 class Config:
     clientID = os.getenv('SPOTIFY_API_KEY')
     secretID = os.getenv('SPOTIFY_API_SECRET')
-    BACKEND_PORT = os.getenv('BACK_PORT')
+    BACKEND_PORT = BACKEND_PORT
+    FRONTEND_PORT = FRONTEND_PORT
     redirect_url = f'http://127.0.0.1:{str(BACKEND_PORT)}/callback'
     scope = 'playlist-read-private'
     base_url = 'https://api.deezer.com/search'
