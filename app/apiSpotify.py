@@ -61,7 +61,6 @@ async def main(playlist_id, sp, datos, all_tracks, playlist_info, album_Res, tra
     espera = 1.5  # tiempo de espera fijo para simplificar
 
     semaphore = asyncio.Semaphore(max_concurrent_requests)
-
     async with aiohttp.ClientSession() as session:
         tasks = []
         tasks_album = []
@@ -85,23 +84,24 @@ async def main(playlist_id, sp, datos, all_tracks, playlist_info, album_Res, tra
 
         # Procesa las canciones en este lote
         results = await asyncio.gather(*tasks)
-
-        for result in results:
+        faileds=[]
+        for result, song in zip(results, all_tracks):
             try:
                 track_id = result['data'][0]['id']
                 album_id = result['data'][0]['album']['id']
-
                 track_task = fecth_track(session, track_id, semaphore)
                 tasks_track.append(track_task)
                 album_task = fetch_album(session, album_id, semaphore)
                 tasks_album.append(album_task)
-
                 correctas += 1
             except Exception as e:
-                print(f"Error: {e}")
-                print(result)
+                print(f"Error in search: {e}")
+                print(f"Deleting: {song['track']['name']}")
+                del datos[song['track']['name']]
+                songs.pop(songs.index(song['track']['name']))
+                faileds.append(song)
                 faltantes += 1
-
+        all_tracks = [track for track in all_tracks if track not in faileds]
         # Procesa los álbumes y pistas
         resA = await asyncio.gather(*tasks_album)
         for album_result in resA:
@@ -110,7 +110,7 @@ async def main(playlist_id, sp, datos, all_tracks, playlist_info, album_Res, tra
                 album_Res.append(album_result)
                 album_c += 1
             except Exception as e:
-                print(f"Error: {e}")
+                print(f"Error in album: {e}")
                 album_f += 1
 
         resT = await asyncio.gather(*tasks_track)
@@ -120,15 +120,15 @@ async def main(playlist_id, sp, datos, all_tracks, playlist_info, album_Res, tra
                 track_Res.append(track_result)
                 track_c += 1
             except Exception as e:
-                print(f"Error: {e}")
+                print(f"Error in track: {e}")
                 track_f += 1
         try:
-            for i, song in enumerate(songs):
-                datos[song].append(track_Res[i]['rank'])
-                datos[song].append(track_Res[i]['bpm'])
-                datos[song].append(track_Res[i]['gain'])
-                datos[song].append([genero['name'] for genero in album_Res[i]['genres']['data']])
-                print(f"song: {song}, rank: {datos[song]}")
+            for i, song in enumerate(album_Res):
+                datos[songs[i]].append(track_Res[i]['rank'])
+                datos[songs[i]].append(track_Res[i]['bpm'])
+                datos[songs[i]].append(track_Res[i]['gain'])
+                datos[songs[i]].append([genero['name'] for genero in album_Res[i]['genres']['data']])
+                #print(f"song: {songs[i]}, rank: {datos[songs[i]]}")
         except Exception as e:
             print(f"Error in dezzer petitions: {e}")
     return datos, album_Res, track_Res
@@ -155,6 +155,7 @@ async def getGrafo(playlist_id, sp, playlist_info):
     for i in range(0, total_tracks, batch_size):
         tmpTracks = all_tracks[i:i + batch_size]
         songs, datos = await process_batch(playlist_id, sp, datos, tmpTracks, playlist_info, album_Res, track_Res)
+        album_Res.clear()
         compareSongs(datos, grafo)
         payload = {"songs": songs, "datos": datos, "matrix": grafo.matrix, "batch_index": i // batch_size}
 
