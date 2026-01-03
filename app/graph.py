@@ -62,49 +62,56 @@ def compareYears(name1: str, name2: str, year1: str, year2: str, w: int) -> int:
 
 def compareSongs(tracks: dict, graph):
     for i, (name1, song1) in enumerate(tracks.items()):
-        graph.add_vertex(song1[0])
+        graph.add_vertex(song1['name'])
         for j, (name2, song2) in enumerate(tracks.items()):
             if name1 == name2:  # If the songs have the same name
                 continue
             w = int(0)
             graph.add_vertex(name2)
-            if song1[1] == song2[1]:  # Album type
+            if song1['album']['type'] == song2['album']['type']:  # Album type
                 w += 3
 
             # If there´s x more songs
-            if int(max(song1[2], song2[2])) - int(min(song1[2], song2[2])) < 5:
+            if (int(max(song1['album']['total_tracks'], song2['album']['total_tracks'])) -
+                    int(min(song1['album']['total_tracks'], song2['album']['total_tracks'])) < 5):
                 w += 3
-            if song1[3] == song2[3]:  # Album name
+            if song1['album']['name'] == song2['album']['name']:  # Album name
                 w *= 2
 
             # Album release date
-            w = compareYears(name1, name2, song1[4], song2[4], w)
+            w = compareYears(name1, name2, song1['album']['release_date'],
+                             song2['album']['release_date'], w)
 
             # Same artist on the album
-            for artist in song1[5]:
-                if artist in song2[5]: w += 3
+            for artist in song1['album']['artists']:
+                if artist in song2['album']['artists']: w += 3
 
-            seconds_diff = int(max(song1[6], song2[6])) - int(min(song1[6], song2[6]))
+            seconds_diff = (int(max(song1['duration'], song2['duration'])) -
+                            int(min(song1['duration'], song2['duration'])))
             if seconds_diff < 30:  # Duration
                 w *= 2
-            if song1[7] == song2[7]:  # Is explicit?
+            if song1['explicit'] == song2['explicit']:  # Is explicit?
                 w += 2
 
-            popularity_diff = int(max(song1[8], song2[8])) - int(min(song1[8], song2[8]))
+            popularity_diff = (int(max(song1['popularity'], song2['popularity']))
+                               - int(min(song1['popularity'], song2['popularity'])))
             if popularity_diff < 10:  # Spotify's popularity (0-100)
                 w += 3
-            ranking_diff = int(max(song1[9], song2[9])) - int(min(song1[9], song2[9]))
+            ranking_diff = (int(max(song1['rank'], song2['rank']))
+                            - int(min(song1['rank'], song2['rank'])))
             if ranking_diff < 1000:  # Dezzer ranking
                 w += 3
-            bpm_diff = float(max(song1[10], song2[10])) - float(min(song1[10], song2[10]))
+            bpm_diff = (float(max(song1['album']['bpm'], song2['album']['bpm']))
+                        - float(min(song1['album']['bpm'], song2['album']['bpm'])))
             if bpm_diff < 20:  # BPM
                 w += 5
-            gain_diff = float(max(song1[11], song2[11])) - float(min(song1[11], song2[11]))
+            gain_diff = (float(max(song1['album']['gain'], song2['album']['gain']))
+                         - float(min(song1['album']['gain'], song2['album']['gain'])))
             if gain_diff < 20:  # Gain
                 w += 5
 
-            for genre in song1[12]:  # Genre
-                if genre in song2[12]:
+            for genre in song1['album']['genres']:  # Genre
+                if genre in song2['album']['genres']:
                     w *= 5
 
             graph.add_edge(name1, name2, w)

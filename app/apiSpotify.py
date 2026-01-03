@@ -53,7 +53,7 @@ async def fecth_track(session, trackID, semaphore):
 async def main(datos, all_tracks, album_Res, track_Res, songs):
     max_concurrent_requests = math.ceil(len(all_tracks) / 10)
     semaphore = asyncio.Semaphore(max_concurrent_requests)
-    async with aiohttp.ClientSession() as session:
+    async with (aiohttp.ClientSession() as session):
         tasks = []
         tasks_album = []
         tasks_track = []
@@ -61,14 +61,19 @@ async def main(datos, all_tracks, album_Res, track_Res, songs):
         for track in all_tracks:
             track_name = track['track']['name']
             songs.append(track_name)
-            datos[track_name] = [track_name, track['track']['album']['album_type'],
-                                 track['track']['album']['total_tracks'],
-                                 track['track']['album']['name'],
-                                 track['track']['album']['release_date'],
-                                 [artist['name'] for artist in track['track']['artists']],
-                                 track['track']['duration_ms'],
-                                 track['track']['explicit'],
-                                 track['track']['popularity']]
+            datos[track_name] = {}
+            datos[track_name]['spotify_id'] = track['track']['id']
+            datos[track_name]["name"] = track_name
+            datos[track_name]['duration'] = track['track']['duration_ms']
+            datos[track_name]['explicit'] = track['track']['explicit']
+            datos[track_name]['popularity'] = track['track']['popularity']
+
+            datos[track_name]['album'] = {}
+            datos[track_name]['album']["type"] = track['track']['album']['album_type']
+            datos[track_name]['album']["total_tracks"] = track['track']['album']['total_tracks']
+            datos[track_name]['album']["name"] = track['track']['album']['name']
+            datos[track_name]['album']["release_date"] = track['track']['album']['release_date']
+            datos[track_name]['album']["artists"] = [artist['name'] for artist in track['track']['artists']]
 
             # Petición de búsqueda de la canción
             task = fetch(session, track_name, semaphore)
@@ -76,11 +81,18 @@ async def main(datos, all_tracks, album_Res, track_Res, songs):
 
         # Procesa las canciones en este lote
         results = await asyncio.gather(*tasks)
-        faileds=[]
+        faileds = []
         for result, song in zip(results, all_tracks):
             try:
+                track_name = song['track']['name']
                 track_id = result['data'][0]['id']
                 album_id = result['data'][0]['album']['id']
+                artist_id = result['data'][0]['artist']['id']
+                # For some reason, deezer just gives me only the id of the first artist
+                datos[track_name]['deezer_id'] = track_id
+                datos[track_name]['album_id'] = album_id
+                datos[track_name]['album']['id'] = album_id
+                datos[track_name]['artist_id'] = artist_id
                 track_task = fecth_track(session, track_id, semaphore)
                 tasks_track.append(track_task)
                 album_task = fetch_album(session, album_id, semaphore)
@@ -94,33 +106,26 @@ async def main(datos, all_tracks, album_Res, track_Res, songs):
         all_tracks = [track for track in all_tracks if track not in faileds]
         # Procesa los álbumes y pistas
         resA = await asyncio.gather(*tasks_album)
-        for album_result in resA:
+        for album_result, track in zip(resA, all_tracks):
             try:
-                album_result['genres']
-                album_Res.append(album_result)
+                song_name = track['track']['name']
+                datos[song_name]['album']['genres'] = [genero['name'] for genero in album_result['genres']['data']]
             except Exception as e:
                 print(f"Error in album: {e}")
 
         resT = await asyncio.gather(*tasks_track)
-        for track_result in resT:
+        for track_result, track in zip(resT, all_tracks):
             try:
-                track_result['bpm']
-                track_Res.append(track_result)
+                song_name = track['track']['name']
+                datos[song_name]['rank'] = track_result['rank']
+                datos[song_name]['album']['bpm'] = track_result['bpm']
+                datos[song_name]['album']['gain'] = track_result['gain']
             except Exception as e:
                 print(f"Error in track: {e}")
-        try:
-            for i, song in enumerate(album_Res):
-                datos[songs[i]].append(track_Res[i]['rank'])
-                datos[songs[i]].append(track_Res[i]['bpm'])
-                datos[songs[i]].append(track_Res[i]['gain'])
-                datos[songs[i]].append([genero['name'] for genero in album_Res[i]['genres']['data']])
-                #print(f"song: {songs[i]}, rank: {datos[songs[i]]}")
-        except Exception as e:
-            print(f"Error in dezzer petitions: {e}")
     return datos, album_Res, track_Res
 
 
-async def process_batch(datos, tmpTracks,album_Res, track_Res):
+async def process_batch(datos, tmpTracks, album_Res, track_Res):
     songs = []
     await main(datos, tmpTracks, album_Res, track_Res, songs)
     return songs, datos
@@ -147,5 +152,5 @@ async def getGrafo(playlist_id, sp, playlist_info):
         yield (json.dumps(payload) + "\n").encode("utf-8")
 
     print("Fin del procesamiento de todas las canciones.")
-    #grafo.read_graph()
+    # grafo.read_graph()
     yield (json.dumps({"done": True}) + "\n").encode("utf-8")
