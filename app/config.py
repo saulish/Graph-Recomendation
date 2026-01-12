@@ -36,6 +36,7 @@ class Config:
     track_Url = 'https://api.deezer.com/track/'
     artist_url = 'https://api.deezer.com/artist'
     album_url = 'https://api.deezer.com/album'
+    MAX_CONCURRENT_TRACKS = 20
 
 
 config = Config()

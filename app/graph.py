@@ -61,9 +61,11 @@ def compareYears(name1: str, name2: str, year1: str, year2: str, w: int) -> int:
 
 
 def compareSongs(tracks: dict, graph):
-    for i, (name1, song1) in enumerate(tracks.items()):
-        graph.add_vertex(song1['name'])
-        for j, (name2, song2) in enumerate(tracks.items()):
+    for i, (id_1, song1) in enumerate(tracks.items()):
+        name1 = song1['name']
+        graph.add_vertex(name1)
+        for j, (id_2, song2) in enumerate(tracks.items()):
+            name2 = song2['name']
             if name1 == name2:  # If the songs have the same name
                 continue
             w = int(0)
@@ -109,9 +111,10 @@ def compareSongs(tracks: dict, graph):
                          - float(min(song1['album']['gain'], song2['album']['gain'])))
             if gain_diff < 20:  # Gain
                 w += 5
-
-            for genre in song1['album']['genres']:  # Genre
-                if genre in song2['album']['genres']:
+            genres_1 = [genre['name'] for genre in song1['album']['genres']]  # Genres
+            genres_2 = [genre['name'] for genre in song2['album']['genres']]
+            for g in genres_1:
+                if g in genres_2:
                     w *= 5
 
             graph.add_edge(name1, name2, w)
