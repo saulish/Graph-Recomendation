@@ -1,3 +1,6 @@
+from .embedding_implementation.genres_helper import helper
+
+
 class Graph:
     def __init__(self, size: int):
         self.nodes = []
@@ -117,6 +120,12 @@ def compareSongs(tracks: dict, graph):
                 if g in genres_2:
                     w *= 5
 
+            genres_id_1 = [g_id['id'] for g_id in song1['album']['genres']]
+            genres_id_2 = [g_id['id'] for g_id in song2['album']['genres']]
+
+            embeddings_diff = helper.album_similarity(genres_id_1, genres_id_2)
+            if embeddings_diff > 0.9:
+                w *= 3
             graph.add_edge(name1, name2, w)
 
     # graph.read_graph()
