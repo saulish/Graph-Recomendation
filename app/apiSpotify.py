@@ -69,32 +69,43 @@ async def main(datos, all_tracks, album_Res, track_Res, songs):
         tasks = []
         tasks_album = []
         tasks_track = []
-
+        faileds = []  # List to identify the searchs that failed
         for track in all_tracks:
-            track_name = track['track']['name']
-            track_id = track['track']['id']
-            songs.append(track_name)  # Maybe use {'id','name'} or something
-            datos[track_id] = {}
-            datos[track_id]['spotify_id'] = track_id
-            datos[track_id]["name"] = track_name
-            datos[track_id]['duration'] = track['track']['duration_ms']
-            datos[track_id]['explicit'] = track['track']['explicit']
-            datos[track_id]['popularity'] = track['track']['popularity']
+            try:
+                track_name = track['track']['name']
+                track_id = track['track']['id']
+                songs.append(track_name)  # Maybe use {'id','name'} or something
+                datos[track_id] = {}
+                datos[track_id]['spotify_id'] = track_id
+                datos[track_id]["name"] = track_name
+                datos[track_id]['duration'] = track['track']['duration_ms']
+                datos[track_id]['explicit'] = track['track']['explicit']
+                datos[track_id]['popularity'] = track['track']['popularity']
 
-            datos[track_id]['album'] = {}
-            datos[track_id]['album']["type"] = track['track']['album']['album_type']
-            datos[track_id]['album']["total_tracks"] = track['track']['album']['total_tracks']
-            datos[track_id]['album']["name"] = track['track']['album']['name']
-            datos[track_id]['album']["release_date"] = fix_release_date(track['track']['album']['release_date'])
-            datos[track_id]['album']["artists"] = [artist['name'] for artist in track['track']['artists']]
-            search = f"{track_name} {", ".join(datos[track_id]['album']["artists"])}"
-            # Petición de búsqueda de la canción
-            task = fetch(session, search, semaphore)
-            tasks.append(task)
+                datos[track_id]['album'] = {}
+                datos[track_id]['album']["type"] = track['track']['album']['album_type']
+                datos[track_id]['album']["total_tracks"] = track['track']['album']['total_tracks']
+                datos[track_id]['album']["name"] = track['track']['album']['name']
+                datos[track_id]['album']["release_date"] = fix_release_date(track['track']['album']['release_date'])
+                datos[track_id]['album']["artists"] = [artist['name'] for artist in track['track']['artists']]
+                search = f"{track_name} {", ".join(datos[track_id]['album']["artists"])}"
+                # Petición de búsqueda de la canción
+                task = fetch(session, search, semaphore)
+                tasks.append(task)
+            except Exception as e:
+                print(f"Error while taking data: {e}")
+                print(f"Probably song has not all the info")
+                print(f"Deleting: {track['track']['name']}")
+                del datos[track['track']['id']]
+                songs.pop(songs.index(track['track']['name']))
+                faileds.append(track)
 
+
+        # Re-adding the tracks to remove those that failed
+        all_tracks = [track for track in all_tracks if track not in faileds]
         # Search of each song
         results = await asyncio.gather(*tasks)
-        faileds = []  # List to identify the searchs that failed
+        faileds= []
         album_ids = []  # List to separate the logic of the search and the album tasks
         repeated_albums = {}  # List of those albums that will not be saved, (for already being cached or duplicated)
         for result, song in zip(results, all_tracks):  # Results of the search of search song
