@@ -124,8 +124,6 @@ def compareSongs(tracks: dict, graph):
             genres_id_2 = [g_id['id'] for g_id in song2['album']['genres']]
 
             embeddings_diff = helper.album_similarity(genres_id_1, genres_id_2)
-            if embeddings_diff > 0.9:
-                w *= 3
-            graph.add_edge(name1, name2, w)
+            w += int((embeddings_diff+0.5)*w)
 
     # graph.read_graph()
