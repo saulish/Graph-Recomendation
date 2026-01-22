@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+spotipy
+aiohttp
+psycopg2-binary
+python-dotenv
+starlette

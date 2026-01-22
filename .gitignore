@@ -1,5 +1,4 @@
 app/.env
 **/.cache
 **/__pycache__/
-**/*.txt
 **/.idea
