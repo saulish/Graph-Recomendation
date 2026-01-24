@@ -79,32 +79,42 @@ class Connection:
         ]
         execute_values(self.cur, query, values)
 
+    def insert_album_genres(self, album_id, genres):
+        query = """
+        INSERT INTO album_genres (album_id, genre_id) 
+        VALUES %s        
+        """
+        try:
+            values = [(album_id, genre) for genre in genres]
+            execute_values(self.cur, query, values)
+        except Exception as e:
+            print(f"Error inserting in album_genres table: {e}")
+            print(f"Album id: {album_id}, genres: {genres}")
+
     # ------------------ QUERIES ------------------
 
     def consult_cached_song(self, songs):
         query = ("""
 SELECT
     s.spotify_id, s.name AS track_name, s.rank, s.popularity,
-    s.duration, s.explicit, s.artists_id,
+    s.duration, s.explicit,s.artists_id,
 
-    a.album_id, a.name AS album_name, a.bpm, a.gain, a.release_date,
-    a.artists, a.album_type, a.number_songs, a.genres_id,
-
-    COALESCE(g.genres, '{}') AS genres
+    a.album_id, a.name AS album_name, a.bpm, a.gain,
+    a.release_date, a.artists, a.album_type, a.number_songs, a.genres_id,
+    COALESCE(array_agg(g.genre) FILTER (WHERE g.genre IS NOT NULL),'{}') AS genres
 FROM songs_data s
-JOIN public.albums a
+JOIN albums a
     ON s.album_id = a.album_id
-LEFT JOIN (
-    SELECT
-        a2.album_id,
-        array_agg(b.genre) FILTER (WHERE b.genre IS NOT NULL) AS genres
-    FROM public.albums a2
-    LEFT JOIN public.genres b
-        ON COALESCE(a2.genres_id, '[]'::jsonb) @> to_jsonb(b.deezer_id)
-    GROUP BY a2.album_id
-) g
-    ON g.album_id = a.album_id
-                 WHERE s.spotify_id = ANY(%s);
+LEFT JOIN album_genres ag
+    ON ag.album_id = a.album_id
+LEFT JOIN genres g
+    ON g.deezer_id = ag.genre_id
+WHERE s.spotify_id = ANY(%s)
+GROUP BY
+    s.spotify_id, s.name, s.rank, s.popularity,
+    s.duration, s.explicit, s.artists_id,
+    a.album_id, a.name, a.bpm, a.gain,
+    a.release_date, a.artists, a.album_type, a.number_songs;
                  """)
         self.cur.execute(query, (songs,))
         self.commit()
@@ -128,7 +138,7 @@ LEFT JOIN (
                 cached[name]['album']['id'] = str(track[7])
                 cached[name]['album']['bpm'] = track[9]
                 cached[name]['album']['gain'] = track[10]
-                cached[name]['album']['release_date'] = str(track[11])
+                cached[name]['album']['release_date'] = str(track[11].isoformat())
                 cached[name]['album']['artists'] = track[12]
                 cached[name]['album']['type'] = track[13]
                 cached[name]['album']['total_tracks'] = track[14]
@@ -144,13 +154,16 @@ LEFT JOIN (
         return cached, songs
 
     def consult_cached_albums(self, albums):
-        query = ("""SELECT a.album_id, a.genres_id,
-                       COALESCE(array_agg(g.genre) FILTER (WHERE g.genre IS NOT NULL), '{}') AS genres
-                        FROM albums a
-                            LEFT JOIN genres g
-                            ON a.genres_id @> to_jsonb(g.deezer_id)
-                        WHERE a.album_id = ANY(%s)
-                        GROUP BY a.album_id, a.genres_id;
+        query = ("""
+SELECT a.album_id, a.genres_id,
+    COALESCE(array_agg(g.genre) FILTER (WHERE g.genre IS NOT NULL), '{}') AS genres
+FROM albums a
+LEFT JOIN album_genres ag
+    ON ag.album_id = a.album_id
+LEFT JOIN genres g
+    ON g.deezer_id = ag.genre_id
+WHERE a.album_id = ANY(%s)
+GROUP BY a.album_id, a.name;
                  """)
         self.cur.execute(query, (albums,))
         self.commit()

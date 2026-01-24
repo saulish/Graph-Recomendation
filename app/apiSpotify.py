@@ -100,12 +100,11 @@ async def main(datos, all_tracks, album_Res, track_Res, songs):
                 songs.pop(songs.index(track['track']['name']))
                 faileds.append(track)
 
-
         # Re-adding the tracks to remove those that failed
         all_tracks = [track for track in all_tracks if track not in faileds]
         # Search of each song
         results = await asyncio.gather(*tasks)
-        faileds= []
+        faileds = []
         album_ids = []  # List to separate the logic of the search and the album tasks
         repeated_albums = {}  # List of those albums that will not be saved, (for already being cached or duplicated)
         for result, song in zip(results, all_tracks):  # Results of the search of search song
@@ -198,12 +197,12 @@ async def main(datos, all_tracks, album_Res, track_Res, songs):
 
                 album_id = track[0]
                 datos[spotify_id]['album']['genres'] = [{'name': genero['name'], 'id': genero['id']}
-                                                       for genero in album_result['genres']['data']]
+                                                        for genero in album_result['genres']['data']]
                 if album_id in repeated_albums:
                     # Here are fetched and duplicated albums
                     for dup_id in repeated_albums[album_id]['song']:
                         datos[dup_id]['album']['genres'] = [{'name': genero['name'], 'id': genero['id']}
-                                                              for genero in album_result['genres']['data']]
+                                                            for genero in album_result['genres']['data']]
             except Exception as e:
                 print(f"Error in album: {e}")
         # Fetching tracks petitions
@@ -230,6 +229,8 @@ async def main(datos, all_tracks, album_Res, track_Res, songs):
                     continue  # If the song has a repeated album, do not commit the album and genree
                 print(f"Inserting {song_name} from the album {album_name} and the id {album_id}")
                 conn.insert_album(datos[spotify_id]['album'])
+                conn.insert_album_genres(datos[spotify_id]['album']['id'],
+                                         [genre['id'] for genre in datos[spotify_id]['album']['genres']])
                 conn.insert_genres(datos[spotify_id]['album']['genres'])
             except Exception as e:
                 print(f"Error while inserting data: {e}")
