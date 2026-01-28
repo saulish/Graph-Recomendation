@@ -175,6 +175,33 @@ GROUP BY a.album_id, a.name;
             data[album_id] = [{'id': id, 'name': genre} for id, genre in zip(album[1], album[2])]
         return data, albums
 
+    def consult_cosine_similarity(self, album_id_1, album_id_2):
+        if album_id_1 == album_id_2:
+            return 1.0
+        query = ("""
+        WITH album_embeddings AS (
+            SELECT
+                ag.album_id,
+                avg(g.embedding) AS embedding
+            FROM album_genres ag
+            JOIN genres g ON g.deezer_id = ag.genre_id
+            WHERE ag.album_id IN (%s, %s)
+              AND g.embedding IS NOT NULL
+            GROUP BY ag.album_id
+        )
+        SELECT
+            a.album_id AS album_a,
+            b.album_id AS album_b,
+            1 - (a.embedding <=> b.embedding) AS cosine_similarity
+        FROM album_embeddings a
+        JOIN album_embeddings b
+            ON a.album_id <> b.album_id;
+        """)
+        self.cur.execute(query, (album_id_1, album_id_2))
+        self.commit()
+        if self.cur.rowcount == 0:
+            return None
+        return self.cur.fetchone()[-1]
     # ------------------ TRANSACTION CONTROL ------------------
 
     def commit(self):

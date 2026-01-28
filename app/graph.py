@@ -1,5 +1,5 @@
-from .embedding_implementation.genres_helper import helper
-
+# from .embedding_implementation.genres_helper import helper        DEPRECATED FOR USING DE EMBEDDING IN DB
+from .postgresConnection import conn
 
 class Graph:
     def __init__(self, size: int):
@@ -120,10 +120,8 @@ def compareSongs(tracks: dict, graph):
                 if g in genres_2:
                     w *= 5
 
-            genres_id_1 = [g_id['id'] for g_id in song1['album']['genres']]
-            genres_id_2 = [g_id['id'] for g_id in song2['album']['genres']]
-
-            embeddings_diff = helper.album_similarity(genres_id_1, genres_id_2)
-            w += int((embeddings_diff+0.5)*w)
+            embeddings_diff = conn.consult_cosine_similarity(song1['album']['id'], song2['album']['id'])
+            if embeddings_diff is not None:
+                w += int((embeddings_diff + 0.5) * w)       # Similarity of genres
             graph.add_edge(name1, name2, w)
     # graph.read_graph()
