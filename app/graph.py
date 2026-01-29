@@ -1,3 +1,5 @@
+from .postgresConnection import conn
+
 class Graph:
     def __init__(self, size: int):
         self.nodes = []
@@ -117,6 +119,8 @@ def compareSongs(tracks: dict, graph):
                 if g in genres_2:
                     w *= 5
 
+            embeddings_diff = conn.consult_cosine_similarity(song1['album']['id'], song2['album']['id'])
+            if embeddings_diff is not None:
+                w += int((embeddings_diff + 0.5) * w)       # Similarity of genres
             graph.add_edge(name1, name2, w)
-
     # graph.read_graph()
