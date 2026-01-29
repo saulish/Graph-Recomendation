@@ -6,8 +6,7 @@ from dotenv import load_dotenv
 load_dotenv()
 BACKEND_PORT = os.getenv('BACK_PORT')
 FRONTEND_PORT = os.getenv('FRONT_PORT')
-G_EMBED_PATH = os.getenv('GENRES_EMBEDDINGS_PATH')
-G_EMBED_VER = os.getenv('GENRES_EMBEDDINGS_VERSION')
+
 def configApp(app):
     app.add_middleware(
         CORSMiddleware,
@@ -30,8 +29,6 @@ class Config:
     secretID = os.getenv('SPOTIFY_API_SECRET')
     BACKEND_PORT = BACKEND_PORT
     FRONTEND_PORT = FRONTEND_PORT
-    GENRES_EMBEDDINGS_PATH = G_EMBED_PATH
-    GENRES_EMBEDDINGS_VERSION = G_EMBED_VER
     redirect_url = f'http://127.0.0.1:{str(BACKEND_PORT)}/callback'
     scope = 'playlist-read-private'
     base_url = 'https://api.deezer.com/search'
