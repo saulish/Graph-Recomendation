@@ -1,4 +1,3 @@
-# from .embedding_implementation.genres_helper import helper        DEPRECATED FOR USING DE EMBEDDING IN DB
 from .postgresConnection import conn
 
 class Graph:
