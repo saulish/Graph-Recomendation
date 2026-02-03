@@ -267,8 +267,6 @@ async def getGrafo(playlist_id, sp, playlist_info, model):
     if data:
         all_tracks = [track for track in all_tracks if track['track']['name'] not in cahed_names]
         total_tracks = len(all_tracks)
-        # compareSongs(data, grafo)
-        
         # Create embeddings for cached songs
         try:
             embeddings_data = model.encode(data)  # Shape: (N_songs, 128)
@@ -286,12 +284,16 @@ async def getGrafo(playlist_id, sp, playlist_info, model):
         tmpTracks = all_tracks[i:i + batch_size]
         songs, datos = await process_batch(datos, tmpTracks, album_Res, track_Res)
         album_Res.clear()
-        compareSongs(datos, grafo)
+        # Create embeddings for cached songs
+        try:
+            embeddings_data = model.encode(datos)  # Shape: (N_songs, 128)
+        except Exception as e:
+            print(f"Error while calculating embeddings: {e}")
+            embeddings_data = None
         payload = {"songs": songs, "datos": datos, "matrix": grafo.matrix, "batch_index": i // batch_size}
 
         yield (json.dumps(payload) + "\n").encode("utf-8")
     end = time.time()
     print("Fin del procesamiento de todas las canciones.")
     print(f"Se procesaron {total_tracks} in {end - start:.4f} segundos.")
-    # grafo.read_graph()
     yield (json.dumps({"done": True}) + "\n").encode("utf-8")
