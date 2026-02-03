@@ -87,13 +87,18 @@ class SongEncoderInference:
             numeric_scaled = (numeric_values - self.scaler_center) / self.scaler_scale
             
             # Process genre embedding
-            genre_embedding = song['album'].get('embedding', None)      
-            if genre_embedding is None:
+            genre_embedding = song['album'].get('embedding', None)   
+            has_genre = genre_embedding is not None   
+            if has_genre:
+                GENRE_WEIGHT = 2.0 # Weight for genre embeddings
+                genre_embedding = np.array(genre_embedding, dtype=np.float32)
+                
+            else:
                 genre_embedding = np.zeros(128, dtype=np.float32)
-        
-            # Concat numeric and genre embeddings
+                GENRE_WEIGHT = 0.1
+            genre_embedding = genre_embedding * GENRE_WEIGHT
+            # Concat numeric and weighted genre embeddings
             combined = np.concatenate([numeric_scaled, genre_embedding])
-            
             if combined.shape[0] != 137:
                 raise ValueError(f"Input has {combined.shape[0]} dims, expected 137")
             

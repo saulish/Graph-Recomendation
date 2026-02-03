@@ -263,9 +263,10 @@ async def getGrafo(playlist_id, sp, playlist_info, model):
     total_tracks = len(all_tracks)
     batch_size = config.MAX_CONCURRENT_TRACKS
     datos = {}
-    data, cahed_names = conn.consult_cached_song([track['track']['id'] for track in all_tracks])
+    data, cahed_names, invalid_songs = conn.consult_cached_song([track['track']['id'] for track in all_tracks])
     if data:
-        all_tracks = [track for track in all_tracks if track['track']['name'] not in cahed_names]
+        all_tracks = [track for track in all_tracks if track['track']['name']
+                      not in cahed_names and track['track']['name'] not in invalid_songs]
         total_tracks = len(all_tracks)
         # Create embeddings for cached songs
         try:
@@ -273,7 +274,10 @@ async def getGrafo(playlist_id, sp, playlist_info, model):
         except Exception as e:
             print(f"Error while calculating embeddings: {e}")
             embeddings_data = None
-
+        difference = model.similarity(embeddings_data, embeddings_data)
+        for i, name in enumerate(data):
+            for j, othername in enumerate(data):
+                print(f"Comparing {name} with {othername}: {difference[i][j]}")
         payload = {"songs": cahed_names, "datos": data, "matrix": grafo.matrix, "batch_index": 0}
         yield (json.dumps(payload) + "\n").encode("utf-8")
         print(f"Cached songs: {cahed_names}")

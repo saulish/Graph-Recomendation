@@ -121,6 +121,7 @@ GROUP BY
         self.commit()
         cached = {}
         songs = []
+        invalid_songs = []
         for track in self.cur.fetchall():
             try:
                 name = track[1]
@@ -147,17 +148,21 @@ GROUP BY
                 cached[name]['album']['genres'] = [{'id': id, 'name': genre} for id, genre in zip(track[15], track[16])]
                 embedding_str = track[17]
                 if embedding_str is None:
-                    cached[name]['album']['embedding'] = None    # if there's no embedding, set to None
+                    del cached[track[1]]
+                    invalid_songs.append(name)
+                    print(f"No embedding found for song {name}, removing song.")
+                    continue
                 else:
                     embedding = list(map(float, embedding_str.strip('[]').split(',')))
-                cached[name]['album']['embedding'] = embedding
+                    cached[name]['album']['embedding'] = embedding
                 songs.append(name)
 
             except Exception as e:
                 print(f"Error consulting the database: {e}")
+                invalid_songs.append(track[1])
                 del cached[track[1]]
                 continue
-        return cached, songs
+        return cached, songs, invalid_songs
 
     def consult_cached_albums(self, albums):
         query = ("""
