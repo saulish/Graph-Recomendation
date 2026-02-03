@@ -249,7 +249,7 @@ async def process_batch(datos, tmp_tracks, album_res, track_res):
 temporal_db = {}
 
 
-async def getGrafo(playlist_id, sp, playlist_info):
+async def getGrafo(playlist_id, sp, playlist_info, model):
     n_playlist = playlist_info['tracks']['total']
     grafo = Graph(n_playlist)
     album_Res = []
@@ -267,7 +267,15 @@ async def getGrafo(playlist_id, sp, playlist_info):
     if data:
         all_tracks = [track for track in all_tracks if track['track']['name'] not in cahed_names]
         total_tracks = len(all_tracks)
-        compareSongs(data, grafo)
+        # compareSongs(data, grafo)
+        
+        # Create embeddings for cached songs
+        try:
+            embeddings_data = model.encode(data)  # Shape: (N_songs, 128)
+        except Exception as e:
+            print(f"Error while calculating embeddings: {e}")
+            embeddings_data = None
+
         payload = {"songs": cahed_names, "datos": data, "matrix": grafo.matrix, "batch_index": 0}
         yield (json.dumps(payload) + "\n").encode("utf-8")
         print(f"Cached songs: {cahed_names}")

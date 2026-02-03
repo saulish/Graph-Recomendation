@@ -5,3 +5,7 @@ aiohttp
 psycopg2-binary
 python-dotenv
 starlette
+torch
+numpy
+scikit-learn
+pandas

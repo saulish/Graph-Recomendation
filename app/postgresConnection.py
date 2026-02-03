@@ -101,7 +101,8 @@ SELECT
 
     a.album_id, a.name AS album_name, a.bpm, a.gain,
     a.release_date, a.artists, a.album_type, a.number_songs, a.genres_id,
-    COALESCE(array_agg(g.genre) FILTER (WHERE g.genre IS NOT NULL),'{}') AS genres
+    COALESCE(array_agg(g.genre) FILTER (WHERE g.genre IS NOT NULL),'{}') AS genres,
+    avg(g.embedding) AS album_embedding
 FROM songs_data s
 JOIN albums a
     ON s.album_id = a.album_id
@@ -144,7 +145,12 @@ GROUP BY
                 cached[name]['album']['total_tracks'] = track[14]
                 cached[name]['album']['genres'] = {}
                 cached[name]['album']['genres'] = [{'id': id, 'name': genre} for id, genre in zip(track[15], track[16])]
-
+                embedding_str = track[17]
+                if embedding_str is None:
+                    cached[name]['album']['embedding'] = None    # if there's no embedding, set to None
+                else:
+                    embedding = list(map(float, embedding_str.strip('[]').split(',')))
+                cached[name]['album']['embedding'] = embedding
                 songs.append(name)
 
             except Exception as e:

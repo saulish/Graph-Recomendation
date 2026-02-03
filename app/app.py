@@ -2,7 +2,7 @@ from .conect import login, createAccesToken, getTokenInfo, getPlaylist, getData
 from .config import config, configApp
 from fastapi import FastAPI, Request
 from fastapi.responses import RedirectResponse, JSONResponse, StreamingResponse
-
+from .embeddings.model_inference import model
 
 
 class App:
@@ -80,5 +80,5 @@ class App:
                 print(f"Error taking the token: {e}")
                 return JSONResponse({"ok": False, "Error": f"{e}"}, status_code=401)
 
-            generator = getData(token_info, playlist_id)
+            generator = getData(token_info, playlist_id, model)
             return StreamingResponse(generator, media_type="application/x-ndjson")
