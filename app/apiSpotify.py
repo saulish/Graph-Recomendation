@@ -69,7 +69,7 @@ async def main(datos, all_tracks, album_Res, track_Res, songs):
         tasks = []
         tasks_album = []
         tasks_track = []
-        faileds = []  # List to identify the searchs that failed
+        faileds = []  # List to identify the searches that failed
         for track in all_tracks:
             try:
                 track_name = track['track']['name']
@@ -263,6 +263,8 @@ async def getGrafo(playlist_id, sp, playlist_info, model):
     total_tracks = len(all_tracks)
     batch_size = config.MAX_CONCURRENT_TRACKS
     datos = {}
+    # This buffer it´s necessary for the UMAP model, and also saving the data to send each iteration all the new songs
+    buffer_data = {'embeddings': [], 'data': {}}
     data, cahed_names, invalid_songs = conn.consult_cached_song([track['track']['id'] for track in all_tracks])
     if data:
         all_tracks = [track for track in all_tracks if track['track']['name']
@@ -270,34 +272,67 @@ async def getGrafo(playlist_id, sp, playlist_info, model):
         total_tracks = len(all_tracks)
         # Create embeddings for cached songs
         try:
-            embeddings_data = model.encode(data)  # Shape: (N_songs, 128)
+            embeddings_data = model.encode(data)  # Shape: (batch_size, 128)
+            # Saving the embeddings in a list, using extend to have it only in one list
+            buffer_data['embeddings'].extend(embeddings_data)
+            # The same with data, but with update to have all the data of each song
+            buffer_data['data'].update(data)
+            # Here always creates the 2d embeddings because it's the firsts batch
+            embeddings_2d = model.reduct(embeddings_data)  # Shape (batch_size, 2)
         except Exception as e:
             print(f"Error while calculating embeddings: {e}")
             embeddings_data = None
-        difference = model.similarity(embeddings_data, embeddings_data)
-        for i, name in enumerate(data):
-            for j, othername in enumerate(data):
-                print(f"Comparing {name} with {othername}: {difference[i][j]}")
-        payload = {"songs": cahed_names, "datos": data, "matrix": grafo.matrix, "batch_index": 0}
+            embeddings_2d = None
+        payload = create_payload(data, embeddings_2d)
         yield (json.dumps(payload) + "\n").encode("utf-8")
         print(f"Cached songs: {cahed_names}")
     # Procesa las canciones en lotes de batch_size
     import time
+    # Define how many iterations the 2D embeddings are created
+    MIN_UMAP_SIZE = 3
     start = time.time()
     for i in range(0, total_tracks, batch_size):
+        iteration = int(i/batch_size)+1
         tmpTracks = all_tracks[i:i + batch_size]
+        left_tracks = len(all_tracks[i + batch_size:])
         songs, datos = await process_batch(datos, tmpTracks, album_Res, track_Res)
         album_Res.clear()
         # Create embeddings for cached songs
         try:
             embeddings_data = model.encode(datos)  # Shape: (N_songs, 128)
+            # Save the data and embeddings
+            buffer_data['embeddings'].extend(embeddings_data)
+            buffer_data['data'].update(datos)
+            # Here to avoid recreating the 2D each batch, we create it every MIN_UMAP_SIZE batches
+            # It works if the min number of iterations, or there are not left track, so it´s the last iteration
+            if iteration % MIN_UMAP_SIZE == 0 or left_tracks == 0:
+                # We create the 2D embeddings using all the embeddings
+                embeddings_2d = model.reduct(buffer_data['embeddings'])
+            else:
+                embeddings_2d = None
         except Exception as e:
             print(f"Error while calculating embeddings: {e}")
             embeddings_data = None
-        payload = {"songs": songs, "datos": datos, "matrix": grafo.matrix, "batch_index": i // batch_size}
-
+            embeddings_2d = None
+        # The payload it's created using all the data and the fresh createds 2D embeddings
+        payload = create_payload(buffer_data['data'], embeddings_2d)
         yield (json.dumps(payload) + "\n").encode("utf-8")
     end = time.time()
     print("Fin del procesamiento de todas las canciones.")
     print(f"Se procesaron {total_tracks} in {end - start:.4f} segundos.")
     yield (json.dumps({"done": True}) + "\n").encode("utf-8")
+
+
+def create_payload(data, embeddings_2d):
+    payload = [
+        {
+            'id': song_id,
+            'x': float(embeddings_2d[i][0]) if embeddings_2d is not None else None,
+            'y': float(embeddings_2d[i][1]) if embeddings_2d is not None else None,
+            'song_name': data[song_id]['name'],
+            'artists': data[song_id]['album']['artists'],
+            'album_name': data[song_id]['album']['name']
+        }
+        for i, song_id in enumerate(data)
+    ]
+    return payload
