@@ -36,7 +36,7 @@ curl http://127.0.0.1:8000/
 ## Current status (branches)
 
 - `main`: full **ingestion + cache + graph + genre embeddings** pipeline. Uses **pgvector** (PostgreSQL extension) for embedding storage and cosine similarity.
-- Embeddings are now **integrated in main** (128-dimensional vectors for genres).
+- `feature/embedding-songs`: **song embeddings** (128-dimensional vectors). PyTorch-trained autoencoder combining audio features + genre embeddings. Includes **UMAP** dimensionality reduction (128D → 2D) for frontend visualization.
 
 ---
 
@@ -52,13 +52,12 @@ curl http://127.0.0.1:8000/
      - track (`/track/{id}`) for `rank`, `bpm`, `gain`
      - album (`/album/{id}`) for genres (when not cached)
    - Persists results in PostgreSQL (songs, albums, genres).
-4) Builds a graph (adjacency matrix) where edge weights come from a feature-based heuristic:
-   - album type, track count, release date, artists
-   - explicit flag, Spotify popularity, Deezer rank
-   - BPM and gain
-   - shared genres (exact match)
-   - **genre embeddings similarity** (cosine similarity via pgvector)
-5) Streams results in NDJSON so the frontend can consume progress incrementally.
+4) Generates **128-dimensional song embeddings** using a PyTorch autoencoder that combines:
+   - Audio features: BPM, gain, duration, popularity, explicit, rank
+   - Album features: type, track count, release year
+   - **Weighted genre embeddings** (128D from album)
+5) Reduces dimensionality with **UMAP** (128D → 2D) for interactive frontend visualization.
+6) Streams results in **NDJSON** by batches with 2D coordinates (x, y) for each song enabling progressive rendering.
 
 ---
 
@@ -73,24 +72,33 @@ curl http://127.0.0.1:8000/
 
 ### `/analizePlaylist` response (NDJSON)
 
-The response is a stream of JSON lines (one JSON object per line).
-
-Currently, for **testing and debugging**, the payload includes a `datos` object with enriched per-track metadata (Spotify/Deezer/album/genres). This will be simplified to expose only:
-
-- `songs` (tracks processed in the batch)
-- `matrix` (graph / adjacency matrix)
-- `batch_index` (progress)
-
-Example of the current batch payload:
+The response is a stream of JSON lines (one JSON object per line). Each batch contains an array of songs with their 2D coordinates for visualization:
 
 ```json
-{
-  "songs": ["Track A", "Track B"],
-  "datos": {"<spotify_id>": {"name": "...", "album": {"genres": [...]}, ...}},
-  "matrix": [[0, 10, 0], [10, 0, 2], [0, 2, 0]],
-  "batch_index": 0
-}
+[
+  {
+    "id": "<spotify_id>",
+    "x": 0.245,
+    "y": -0.832,
+    "song_name": "Track A",
+    "artists": ["Artist 1", "Artist 2"],
+    "album_name": "Album Name"
+  },
+  {
+    "id": "<spotify_id>",
+    "x": 1.123,
+    "y": 0.456,
+    "song_name": "Track B",
+    "artists": ["Artist 3"],
+    "album_name": "Another Album"
+  }
+]
 ```
+
+**Notes on coordinates (x, y):**
+- Generated via **UMAP** (128D → 2D reduction) every 3 batches or in the final batch
+- Represent semantic similarity: nearby songs are more similar
+- `null` when not yet calculated in that specific batch
 
 At the end:
 
@@ -170,7 +178,7 @@ The schema is based on the provided dump (`gr_schema.sql`). For convenience, a p
 Main tables:
 
 - `albums` — album metadata (BPM, gain, release date, etc.)
-- `songs_data` — cached Spotify tracks with Deezer enrichment
+- `songs_data` — cached Spotify tracks with Deezer enrichment + **128D embeddings** and model version
 - `genres` — genre catalog with **128-dimensional embeddings** (via pgvector)
 - `album_genres` — **many-to-many** relationship (album ↔ genres) for optimized joins
 - `artists` (present in the schema; not actively used yet)
@@ -179,8 +187,9 @@ Notes:
 
 - `albums.genres_id` is stored as JSONB (array of genre IDs) for backward compatibility.
 - **`album_genres` table** (many-to-many) is now used for efficient joins with `genres` (including embeddings).
-- **pgvector extension** is installed in PostgreSQL. The `genres` table has a `vector(128)` column for embeddings.
-- Cosine similarity is computed in SQL using the `<=>` operator (pgvector).
+- **pgvector extension** is installed in PostgreSQL. Both `genres` and `songs_data` tables have `vector(128)` columns for embeddings.
+- **Embeddings cache**: `songs_data.embedding` stores pre-computed vectors to avoid regeneration in subsequent analyses.
+- `embedding_ver` tracks model version to invalidate cache when the model is updated.
 
 ---
 
@@ -234,6 +243,55 @@ The system uses **128-dimensional genre embeddings** to compute semantic similar
 
 ---
 
+## Song embeddings (autoencoder + UMAP)
+
+The system generates **128-dimensional embeddings per song** using a PyTorch-trained neural autoencoder, combining audio features with genre embeddings to capture multidimensional similarity.
+
+**Model architecture:**
+
+- **Input**: 137 dimensions
+  - 9 numeric features: rank, popularity, duration, BPM, gain, album_type, number_songs, explicit, release_year
+  - 128 dimensions from genre embeddings (weighted average × 2.0 for songs with genres)
+  
+- **Encoder**: 4 dense layers with LeakyReLU, BatchNorm, Dropout
+  - 137 → 256 → 256 → 128 → **64 (final embedding)**
+  
+- **Decoder**: symmetric for reconstruction (64 → 128 → 256 → 256 → 137)
+
+**Preprocessing:**
+- StandardScaler for numeric feature normalization
+- Imputation for missing values (especially BPM)
+- Differential weighting for songs without genres (embedding × 0.1 vs × 2.0)
+
+**Dimensionality reduction with UMAP:**
+```python
+reducer = umap.UMAP(
+    n_components=2,
+    n_neighbors=15,
+    min_dist=0.1,
+    metric="cosine",
+    random_state=42
+)
+embeddings_2D = reducer.fit_transform(embeddings_128D)
+```
+
+**Performance optimization:**
+- 2D embeddings are generated every 3 batches (MIN_UMAP_SIZE) or in the final batch
+- Avoids recalculating UMAP on every batch, reducing latency
+- Buffer accumulates 128D embeddings for aggregate transformation
+
+**PostgreSQL cache:**
+- Column `songs_data.embedding` (128D vector) stores pre-computed embeddings
+- `embedding_ver` invalidates cache when model is updated
+- Cached songs generate 2D embeddings immediately in the first batch
+
+**Benefits:**
+- Interactive 2D visualization where distance represents semantic similarity
+- Captures non-linear relationships between audio features and genres
+- Persistent cache accelerates subsequent analyses of the same playlist
+
+---
+
 ## Notes (real-world behavior)
 
 - Spotify: non-processable items may appear (podcasts/episodes, removed tracks, incomplete metadata). They are filtered/skipped when needed.
@@ -252,8 +310,12 @@ The system uses **128-dimensional genre embeddings** to compute semantic similar
 
 - ✅ Integrate genre embeddings (128-dimensional vectors)
 - ✅ Store embeddings in Postgres with `pgvector`
-- Track embeddings (beyond BPM/gain) — learn from audio features
-- Song-level embeddings (aggregate from album genres + audio features)
+- ✅ **Song embeddings** (PyTorch autoencoder with 128D)
+- ✅ **Dimensionality reduction with UMAP** (128D → 2D) for visualization
+- ✅ **Embeddings cache** in PostgreSQL with model versioning
+- Song similarity using embeddings (cosine similarity in pgvector)
+- Recommendation graph with song embedding-based weights
+- Pathfinding algorithms (Dijkstra, clustering) over the graph
 - Cursor-based pagination
 - Docker + CI/CD
 
@@ -305,7 +367,7 @@ curl http://127.0.0.1:8000/
 ## Estado actual (branches)
 
 - `main`: pipeline completo de **ingesta + caché + grafo + embeddings de géneros**. Usa **pgvector** (extensión de PostgreSQL) para almacenar embeddings y calcular similitud por coseno.
-- Los embeddings **ya están integrados en main** (vectores de 128 dimensiones para géneros). 
+- `feature/embedding-songs`: **embeddings de canciones** (vectores de 128 dimensiones). Autoencoder entrenado con PyTorch que combina features de audio + embeddings de géneros. Incluye reducción dimensional con **UMAP** (128D → 2D) para visualización en frontend. 
 
 ---
 
@@ -321,13 +383,12 @@ curl http://127.0.0.1:8000/
      - track (`/track/{id}`) para `rank`, `bpm`, `gain`
      - álbum (`/album/{id}`) para géneros (si no estaban cacheados)
    - Guarda en PostgreSQL (canciones, álbumes, géneros).
-4) Construye un grafo (matriz de adyacencia) donde el peso entre canciones se calcula con una heurística basada en:
-   - tipo de álbum, número de tracks, año/fecha, artistas
-   - explicit, popularidad Spotify, ranking Deezer
-   - BPM y gain
-   - géneros compartidos (match exacto)
-   - **similitud de embeddings de géneros** (similitud coseno vía pgvector)
-5) Devuelve la salida en **streaming NDJSON** por lotes para que el frontend consuma incrementalmente.
+4) Genera **embeddings de canciones de 128 dimensiones** usando un autoencoder PyTorch que combina:
+   - Features de audio: BPM, gain, duración, popularidad, explicit, rank
+   - Features de álbum: tipo, número de tracks, año de lanzamiento
+   - **Embeddings ponderados de géneros** (128D del álbum)
+5) Reduce dimensionalidad con **UMAP** (128D → 2D) para visualización interactiva en el frontend.
+6) Devuelve la salida en **streaming NDJSON** por lotes con coordenadas 2D (x, y) de cada canción para renderizado progresivo.
 
 ---
 
@@ -342,24 +403,34 @@ curl http://127.0.0.1:8000/
 
 ### Respuesta de `/analizePlaylist` (NDJSON)
 
-La respuesta es una secuencia de líneas JSON (una por línea).
-
-Actualmente, para **pruebas y depuración**, el payload incluye un objeto `datos` con metadata enriquecida por canción (Spotify/Deezer/álbum/géneros). Esta estructura **se simplificará** para exponer solo:
-
-- `songs` (canciones procesadas en el lote)
-- `matrix` (grafo / matriz de adyacencia)
-- `batch_index` (progreso)
-
-Ejemplo conceptual del payload actual por lote:
+La respuesta es una secuencia de líneas JSON (una por línea). Cada lote contiene un array de canciones con sus coordenadas 2D para visualización:
 
 ```json
-{
-  "songs": ["Track A", "Track B"],
-  "datos": {"<spotify_id>": {"name": "...", "album": {"genres": [...]}, ...}},
-  "matrix": [[0, 10, 0], [10, 0, 2], [0, 2, 0]],
-  "batch_index": 0
-}
+[
+  {
+    "id": "<spotify_id>",
+    "x": 0.245,
+    "y": -0.832,
+    "song_name": "Track A",
+    "artists": ["Artist 1", "Artist 2"],
+    "album_name": "Album Name"
+  },
+  {
+    "id": "<spotify_id>",
+    "x": 1.123,
+    "y": 0.456,
+    "song_name": "Track B",
+    "artists": ["Artist 3"],
+    "album_name": "Another Album"
+  }
+]
 ```
+
+**Notas sobre las coordenadas (x, y):**
+- Generadas mediante **UMAP** (reducción de 128D → 2D) cada 3 batches o en el último lote
+- Representan similitud semántica: canciones cercanas son más similares
+- `null` cuando no se han calculado en ese batch específico
+
 Al final se emite:
 
 ```json
@@ -438,7 +509,7 @@ El schema está basado en el dump adjunto `gr_schema.sql`. Para conveniencia, ha
 Tablas principales:
 
 - `albums` — metadata de álbumes (BPM, gain, fecha de lanzamiento, etc.)
-- `songs_data` — tracks de Spotify cacheados con enriquecimiento de Deezer
+- `songs_data` — tracks de Spotify cacheados con enriquecimiento de Deezer + **embeddings de 128D** y versión del modelo
 - `genres` — catálogo de géneros con **embeddings de 128 dimensiones** (vía pgvector)
 - `album_genres` — relación **muchos-a-muchos** (álbum ↔ géneros) para joins optimizados
 - `artists` (presente en el schema; no se usa activamente aún)
@@ -447,8 +518,9 @@ Notas:
 
 - `albums.genres_id` se almacena como JSONB (array de IDs de género) para compatibilidad hacia atrás.
 - **Tabla `album_genres`** (muchos-a-muchos) se usa ahora para joins eficientes con `genres` (incluidos embeddings).
-- **Extensión pgvector** está instalada en PostgreSQL. La tabla `genres` tiene una columna `vector(128)` para embeddings.
-- La similitud coseno se calcula en SQL usando el operador `<=>` (pgvector).
+- **Extensión pgvector** está instalada en PostgreSQL. Las tablas `genres` y `songs_data` tienen columnas `vector(128)` para embeddings.
+- **Cache de embeddings**: `songs_data.embedding` almacena vectores pre-calculados para evitar regeneración en subsecuentes análisis.
+- `embedding_ver` rastrea la versión del modelo para invalidar cache cuando el modelo se actualiza.
 
 ---
 
@@ -502,6 +574,55 @@ El sistema utiliza **embeddings de géneros de 128 dimensiones** para calcular l
 
 ---
 
+## Embeddings de canciones (autoencoder + UMAP)
+
+El sistema genera **embeddings de 128 dimensiones por canción** usando un autoencoder neuronal entrenado con PyTorch, combinando features de audio con embeddings de géneros para capturar similitud multidimensional.
+
+**Arquitectura del modelo:**
+
+- **Input**: 137 dimensiones
+  - 9 features numéricas: rank, popularity, duration, BPM, gain, album_type, number_songs, explicit, release_year
+  - 128 dimensiones de embeddings de géneros (promedio ponderado × 2.0 para canciones con géneros)
+  
+- **Encoder**: 4 capas densas con LeakyReLU, BatchNorm, Dropout
+  - 137 → 256 → 256 → 128 → **64 (embedding final)**
+  
+- **Decoder**: simétrico para reconstrucción (64 → 128 → 256 → 256 → 137)
+
+**Preprocesamiento:**
+- StandardScaler para normalización de features numéricas
+- Imputación de valores faltantes (especialmente BPM)
+- Peso diferencial para canciones sin géneros (embedding × 0.1 vs × 2.0)
+
+**Reducción dimensional con UMAP:**
+```python
+reducer = umap.UMAP(
+    n_components=2,
+    n_neighbors=15,
+    min_dist=0.1,
+    metric="cosine",
+    random_state=42
+)
+embeddings_2D = reducer.fit_transform(embeddings_128D)
+```
+
+**Optimización de rendimiento:**
+- Los embeddings 2D se generan cada 3 batches (MIN_UMAP_SIZE) o en el último lote
+- Evita recalcular UMAP en cada batch, reduciendo latencia
+- Buffer acumula embeddings 128D para transformación agregada
+
+**Cache en PostgreSQL:**
+- Columna `songs_data.embedding` (vector 128D) almacena embeddings pre-calculados
+- `embedding_ver` invalida cache cuando el modelo se actualiza
+- Canciones cacheadas generan embeddings 2D inmediatamente en el primer batch
+
+**Beneficios:**
+- Visualización interactiva en 2D donde la distancia representa similitud semántica
+- Captura relaciones no lineales entre features de audio y géneros
+- Cache persistente acelera análisis subsecuentes de la misma playlist
+
+---
+
 ## Notas de diseño (por qué así)
 
 - **Concurrencia controlada**: acelera llamadas a Deezer.
@@ -529,8 +650,12 @@ El sistema utiliza **embeddings de géneros de 128 dimensiones** para calcular l
 
 - ✅ Integrar embeddings de géneros (vectores de 128 dimensiones)
 - ✅ Persistir embeddings en Postgres con `pgvector`
-- Track embeddings (más allá de BPM/gain) — aprender desde features de audio
-- Embeddings a nivel canción (agregar desde géneros + audio features)
+- ✅ **Embeddings de canciones** (autoencoder PyTorch con 128D)
+- ✅ **Reducción dimensional con UMAP** (128D → 2D) para visualización
+- ✅ **Cache de embeddings** en PostgreSQL con versionado de modelo
+- Similitud entre canciones usando embeddings (cosine similarity en pgvector)
+- Grafo de recomendación con pesos basados en embeddings de canciones
+- Algoritmos de pathfinding (Dijkstra, clustering) sobre el grafo
 - Paginación cursor-based
 - Docker + CI/CD
 
