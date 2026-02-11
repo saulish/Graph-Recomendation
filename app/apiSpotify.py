@@ -1,7 +1,6 @@
 import asyncio
 import math
 from .config import config
-from .graph import Graph, compareSongs
 from .postgresConnection import conn
 import aiohttp
 import json
@@ -255,7 +254,6 @@ async def process_batch(datos, tmp_tracks, album_res, track_res, model):
 
 async def getGrafo(playlist_id, sp, playlist_info, model):
     n_playlist = playlist_info['tracks']['total']
-    grafo = Graph(n_playlist)
     album_Res = []
     track_Res = []
 
