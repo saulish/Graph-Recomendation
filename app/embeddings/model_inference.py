@@ -4,6 +4,8 @@ from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 import pandas as pd
 import umap
+from app.config import config
+
 
 class SongEncoderInference:
 
@@ -11,7 +13,7 @@ class SongEncoderInference:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         checkpoint = torch.load(model_path, map_location=self.device)
-
+        config.SONG_EMBEDDING_VERSION = checkpoint['embedding_version'] if 'embedding_version' in checkpoint else 0
         # Recreate model
         self.model = SongAutoencoder(
             input_dim=checkpoint['input_dim'],
@@ -27,7 +29,7 @@ class SongEncoderInference:
         self.scaler_scale = checkpoint['scaler_scale']
         self.imputer_statistics = checkpoint['imputer_statistics']
 
-        print(f"Model loaded from: {model_path}")
+        print(f"Model loaded from: {model_path}, version: {checkpoint['embedding_version']}")
         print(f"Embedding dim: {checkpoint['embedding_dim']}")
 
     def preprocess_songs(self, data):
@@ -110,15 +112,17 @@ class SongEncoderInference:
         # The starting point, uses the dict data to produce embeddings of songs
         if not data:
             raise ValueError("No data to process")
+        try:
+            # Preprocess the songs, using the correct order of features
+            X = self.preprocess_songs(data)
+            # Convert to tensor
+            X_tensor = torch.FloatTensor(X).to(self.device)
 
-        # Preprocess the songs, using the correct order of features
-        X = self.preprocess_songs(data)
-        # Convert to tensor
-        X_tensor = torch.FloatTensor(X).to(self.device)
-
-        # Generate embeddings (N, 128)
-        with torch.no_grad():
-            embeddings = self.model.encode(X_tensor).cpu().numpy()
+            # Generate embeddings (N, 128)
+            with torch.no_grad():
+                embeddings = self.model.encode(X_tensor).cpu().numpy()
+        except Exception as e:
+            print(f"Error while encoding data: {e}")
 
         return embeddings
 

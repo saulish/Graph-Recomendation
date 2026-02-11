@@ -46,7 +46,9 @@ CREATE TABLE IF NOT EXISTS public.songs_data (
     explicit    boolean NOT NULL,
     album_id    text NOT NULL,
     artists_id  jsonb NOT NULL,
-    spotify_id  text PRIMARY KEY
+    spotify_id  text PRIMARY KEY,
+    embedding   vector(128),  -- 128-dimensional song embeddings (pgvector)
+    embedding_ver integer DEFAULT 0
 );
 
 -- Optional indexes for performance

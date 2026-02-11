@@ -27,6 +27,7 @@ def configApp(app):
 class Config:
     clientID = os.getenv('SPOTIFY_API_KEY')
     secretID = os.getenv('SPOTIFY_API_SECRET')
+    SONG_EMBEDDING_VERSION = 0
     BACKEND_PORT = BACKEND_PORT
     FRONTEND_PORT = FRONTEND_PORT
     redirect_url = f'http://127.0.0.1:{str(BACKEND_PORT)}/callback'

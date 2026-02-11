@@ -3,7 +3,7 @@ import json
 import psycopg2
 from psycopg2.extras import execute_values
 from dotenv import load_dotenv
-
+from .config import config
 
 class Connection:
     def __init__(self):
@@ -23,9 +23,9 @@ class Connection:
         query = """
         INSERT INTO songs_data (
             spotify_id, deezer_id, name, rank, popularity,
-            duration, explicit, album_id, artists_id
+            duration, explicit, album_id, artists_id, embedding, embedding_ver
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         values = (
             song['spotify_id'],
@@ -36,7 +36,9 @@ class Connection:
             song['duration'],
             song['explicit'],
             song['album_id'],
-            json.dumps(song['artist_id'])
+            json.dumps(song['artist_id']),
+            song['embedding'],
+            config.SONG_EMBEDDING_VERSION
         )
         self.cur.execute(query, values)
 
@@ -95,74 +97,42 @@ class Connection:
 
     def consult_cached_song(self, songs):
         query = ("""
-SELECT
-    s.spotify_id, s.name AS track_name, s.rank, s.popularity,
-    s.duration, s.explicit,s.artists_id,
-
-    a.album_id, a.name AS album_name, a.bpm, a.gain,
-    a.release_date, a.artists, a.album_type, a.number_songs, a.genres_id,
-    COALESCE(array_agg(g.genre) FILTER (WHERE g.genre IS NOT NULL),'{}') AS genres,
-    avg(g.embedding) AS album_embedding
-FROM songs_data s
-JOIN albums a
-    ON s.album_id = a.album_id
-LEFT JOIN album_genres ag
-    ON ag.album_id = a.album_id
-LEFT JOIN genres g
-    ON g.deezer_id = ag.genre_id
-WHERE s.spotify_id = ANY(%s)
-GROUP BY
-    s.spotify_id, s.name, s.rank, s.popularity,
-    s.duration, s.explicit, s.artists_id,
-    a.album_id, a.name, a.bpm, a.gain,
-    a.release_date, a.artists, a.album_type, a.number_songs;
+        SELECT s.name, s.embedding, s.spotify_id, a.artists, a.name
+        FROM songs_data s 
+        JOIN albums a ON s.album_id =a.album_id
+        WHERE s.spotify_id = ANY(%s)        
+        AND s.embedding IS NOT NULL;
                  """)
         self.cur.execute(query, (songs,))
         self.commit()
         cached = {}
         songs = []
+        embeddings = []
         invalid_songs = []
         for track in self.cur.fetchall():
             try:
-                name = track[1]
-                cached[name] = {}
-                cached[name]['spotify_id'] = track[0]
-                cached[name]['name'] = name
-                cached[name]['rank'] = track[2]
-                cached[name]['popularity'] = track[3]
-                cached[name]['duration'] = track[4]
-                cached[name]['explicit'] = track[5]
-                cached[name]['artist_id'] = str(track[6])
-                cached[name]['album_id'] = str(track[7])
+                name = track[0]
+                embedding_str = track[1]
+                spotify_id = track[2]
 
-                cached[name]['album'] = {}
-                cached[name]['album']['name'] = track[8]
-                cached[name]['album']['id'] = str(track[7])
-                cached[name]['album']['bpm'] = track[9]
-                cached[name]['album']['gain'] = track[10]
-                cached[name]['album']['release_date'] = str(track[11].isoformat())
-                cached[name]['album']['artists'] = track[12]
-                cached[name]['album']['type'] = track[13]
-                cached[name]['album']['total_tracks'] = track[14]
-                cached[name]['album']['genres'] = {}
-                cached[name]['album']['genres'] = [{'id': id, 'name': genre} for id, genre in zip(track[15], track[16])]
-                embedding_str = track[17]
                 if embedding_str is None:
-                    del cached[track[1]]
+                    del cached[name]
                     invalid_songs.append(name)
                     print(f"No embedding found for song {name}, removing song.")
                     continue
                 else:
                     embedding = list(map(float, embedding_str.strip('[]').split(',')))
-                    cached[name]['album']['embedding'] = embedding
+                    embeddings.append(embedding)
+                cached[spotify_id] = {'name': name, 'album': {
+                    'artists': track[3], 'name': track[4]}}
                 songs.append(name)
 
             except Exception as e:
                 print(f"Error consulting the database: {e}")
-                invalid_songs.append(track[1])
-                del cached[track[1]]
+                invalid_songs.append(track[0])
+                del cached[track[0]]
                 continue
-        return cached, songs, invalid_songs
+        return cached, songs, invalid_songs, embeddings
 
     def consult_cached_albums(self, albums):
         query = ("""
@@ -213,6 +183,7 @@ GROUP BY a.album_id, a.name;
         if self.cur.rowcount == 0:
             return None
         return self.cur.fetchone()[-1]
+
     # ------------------ TRANSACTION CONTROL ------------------
 
     def commit(self):
