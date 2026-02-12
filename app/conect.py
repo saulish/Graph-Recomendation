@@ -14,14 +14,14 @@ def getPlaylist(token_info):
     return playlists
 
 
-def getData(token_info, playlist_id):
+def getData(token_info, playlist_id, model):
     if not token_info:
         return JSONResponse({"ok": False, "error": "invalid token"}, status_code=401)
     sp = spotipy.Spotify(auth=token_info['access_token'])
 
     from .apiSpotify import getGrafo
     playlist_info = sp.playlist(playlist_id)
-    return getGrafo(playlist_id, sp, playlist_info)
+    return getGrafo(playlist_id, sp, playlist_info, model)
 
 
 def login():

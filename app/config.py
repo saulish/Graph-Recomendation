@@ -7,6 +7,7 @@ load_dotenv()
 BACKEND_PORT = os.getenv('BACK_PORT')
 FRONTEND_PORT = os.getenv('FRONT_PORT')
 
+
 def configApp(app):
     app.add_middleware(
         CORSMiddleware,
@@ -27,6 +28,7 @@ def configApp(app):
 class Config:
     clientID = os.getenv('SPOTIFY_API_KEY')
     secretID = os.getenv('SPOTIFY_API_SECRET')
+    SONG_EMBEDDING_VERSION = 0
     BACKEND_PORT = BACKEND_PORT
     FRONTEND_PORT = FRONTEND_PORT
     redirect_url = f'http://127.0.0.1:{str(BACKEND_PORT)}/callback'
@@ -38,5 +40,9 @@ class Config:
     album_url = 'https://api.deezer.com/album'
     MAX_CONCURRENT_TRACKS = 20
 
+    def get_embedding_version(self):
+        return self.SONG_EMBEDDING_VERSION
+    def set_embedding_version(self, version):
+        self.SONG_EMBEDDING_VERSION =version
 
 config = Config()

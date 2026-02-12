@@ -1,7 +1,6 @@
 import asyncio
 import math
 from .config import config
-from .graph import Graph, compareSongs
 from .postgresConnection import conn
 import aiohttp
 import json
@@ -62,14 +61,14 @@ def fix_release_date(date):
     return date
 
 
-async def main(datos, all_tracks, album_Res, track_Res, songs):
+async def main(datos, all_tracks, album_Res, track_Res, songs, embeddings, model):
     max_concurrent_requests = math.ceil(len(all_tracks) / 10)
     semaphore = asyncio.Semaphore(max_concurrent_requests)
     async with (aiohttp.ClientSession() as session):
         tasks = []
         tasks_album = []
         tasks_track = []
-        faileds = []  # List to identify the searchs that failed
+        faileds = []  # List to identify the searches that failed
         for track in all_tracks:
             try:
                 track_name = track['track']['name']
@@ -141,7 +140,7 @@ async def main(datos, all_tracks, album_Res, track_Res, songs):
                 faileds.append(song)
         # Re-adding the tracks to remove those that failed
         all_tracks = [track for track in all_tracks if track not in faileds]
-        # Consult if there´s albums to cache
+        # Consult if there's albums to cache
         data, cached_albums = conn.consult_cached_albums([album[0] for album in album_ids])
         if data:
             print(f"Cached albums: \n{cached_albums}\nRepeated albums: {repeated_albums}")
@@ -221,6 +220,14 @@ async def main(datos, all_tracks, album_Res, track_Res, songs):
                 print(f"Error in track: {e}")
                 continue
             try:
+                # Create the embedding of the iteration track
+                embedding = model.encode({spotify_id: datos[spotify_id]})
+                if embedding is None:
+                    raise "Embedding encoding error"
+                # Save it for the later 2D creation
+                embeddings.extend(embedding)
+                # Save in the dict to put in the database
+                datos[spotify_id]['embedding'] = embedding.squeeze().tolist()
                 conn.insert_song(datos[spotify_id])
                 if album_id in repeated_albums and 'song' in repeated_albums[album_id] and spotify_id in \
                         repeated_albums[album_id]['song']:
@@ -240,18 +247,15 @@ async def main(datos, all_tracks, album_Res, track_Res, songs):
     return datos, album_Res, track_Res
 
 
-async def process_batch(datos, tmp_tracks, album_res, track_res):
+async def process_batch(datos, tmp_tracks, album_res, track_res, model):
     songs = []
-    await main(datos, tmp_tracks, album_res, track_res, songs)
-    return songs, datos
+    embeddings = []
+    await main(datos, tmp_tracks, album_res, track_res, songs, embeddings, model)
+    return songs, datos, embeddings
 
 
-temporal_db = {}
-
-
-async def getGrafo(playlist_id, sp, playlist_info):
+async def getGrafo(playlist_id, sp, playlist_info, model):
     n_playlist = playlist_info['tracks']['total']
-    grafo = Graph(n_playlist)
     album_Res = []
     track_Res = []
 
@@ -263,27 +267,74 @@ async def getGrafo(playlist_id, sp, playlist_info):
     total_tracks = len(all_tracks)
     batch_size = config.MAX_CONCURRENT_TRACKS
     datos = {}
-    data, cahed_names = conn.consult_cached_song([track['track']['id'] for track in all_tracks])
+    # This buffer it's necessary for the UMAP model, and also saving the data to send each iteration all the new songs
+    buffer_data = {'embeddings': [], 'data': {}}
+    data, cached_names, invalid_songs, embeddings = (
+        conn.consult_cached_song([track['track']['id'] for track in all_tracks]))
     if data:
-        all_tracks = [track for track in all_tracks if track['track']['name'] not in cahed_names]
+        all_tracks = [track for track in all_tracks if track['track']['name']
+                      not in cached_names and track['track']['name'] not in invalid_songs]
         total_tracks = len(all_tracks)
-        compareSongs(data, grafo)
-        payload = {"songs": cahed_names, "datos": data, "matrix": grafo.matrix, "batch_index": 0}
+        # Create embeddings for cached songs
+        try:
+            # Here are the cached songs, so the ones with embedding
+            # Saving the embeddings in a list, using extend to have it only in one list
+            buffer_data['embeddings'].extend(embeddings)
+            # The same with data, but with update to have all the data of each song
+            buffer_data['data'].update(data)
+            # Here always creates the 2d embeddings because it's the firsts batch
+            embeddings_2d = await asyncio.to_thread(model.reduct, embeddings)  # Shape (batch_size, 2)
+        except Exception as e:
+            print(f"Error while calculating embeddings: {e}")
+            embeddings_2d = None
+        payload = create_payload(data, embeddings_2d)
         yield (json.dumps(payload) + "\n").encode("utf-8")
-        print(f"Cached songs: {cahed_names}")
+        print(f"Cached songs: {cached_names}")
     # Procesa las canciones en lotes de batch_size
     import time
+    # Define how many iterations the 2D embeddings are created
+    MIN_UMAP_SIZE = 3
     start = time.time()
     for i in range(0, total_tracks, batch_size):
+        iteration = int(i / batch_size) + 1
         tmpTracks = all_tracks[i:i + batch_size]
-        songs, datos = await process_batch(datos, tmpTracks, album_Res, track_Res)
+        left_tracks = len(all_tracks[i + batch_size:])
+        songs, datos, embeddings = await process_batch(datos, tmpTracks, album_Res, track_Res, model)
         album_Res.clear()
-        compareSongs(datos, grafo)
-        payload = {"songs": songs, "datos": datos, "matrix": grafo.matrix, "batch_index": i // batch_size}
-
+        # Create embeddings for cached songs
+        try:
+            # Save the data and embeddings
+            buffer_data['embeddings'].extend(embeddings)
+            buffer_data['data'].update(datos)
+            # Here to avoid recreating the 2D each batch, we create it every MIN_UMAP_SIZE batches
+            # It works if the min number of iterations, or there are not left track, so it's the last iteration
+            if iteration % MIN_UMAP_SIZE == 0 or left_tracks == 0:
+                # We create the 2D embeddings using all the embeddings
+                embeddings_2d = await asyncio.to_thread(model.reduct, buffer_data['embeddings'])
+            else:
+                embeddings_2d = None
+        except Exception as e:
+            print(f"Error while calculating embeddings: {e}")
+            embeddings_2d = None
+        # The payload it's created using all the data and the fresh creates 2D embeddings
+        payload = create_payload(buffer_data['data'], embeddings_2d)
         yield (json.dumps(payload) + "\n").encode("utf-8")
     end = time.time()
     print("Fin del procesamiento de todas las canciones.")
     print(f"Se procesaron {total_tracks} in {end - start:.4f} segundos.")
-    # grafo.read_graph()
     yield (json.dumps({"done": True}) + "\n").encode("utf-8")
+
+
+def create_payload(data, embeddings_2d):
+    payload = [
+        {
+            'id': song_id,
+            'x': float(embeddings_2d[i][0]) if embeddings_2d is not None else None,
+            'y': float(embeddings_2d[i][1]) if embeddings_2d is not None else None,
+            'song_name': data[song_id]['name'],
+            'artists': data[song_id]['album']['artists'],
+            'album_name': data[song_id]['album']['name']
+        }
+        for i, song_id in enumerate(data)
+    ]
+    return payload
