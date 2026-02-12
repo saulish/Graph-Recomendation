@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS public.songs_data (
     artists_id  jsonb NOT NULL,
     spotify_id  text PRIMARY KEY,
     embedding   vector(128),  -- 128-dimensional song embeddings (pgvector)
+    -- This embeddings can be created using the model /models/song_encoder.pth and the files in embeddings/
     embedding_ver integer DEFAULT 0
 );
 

@@ -35,7 +35,7 @@ curl http://127.0.0.1:8000/
 
 ## Current status (branches)
 
-- `main`: full **ingestion + cache + graph + genre embeddings** pipeline. Uses **pgvector** (PostgreSQL extension) for embedding storage and cosine similarity.
+- `main`(default branch): full **ingestion + cache + graph + genre embeddings** pipeline. Uses **pgvector** (PostgreSQL extension) for embedding storage and cosine similarity.
 - `feature/embedding-songs`: **song embeddings** (128-dimensional vectors). PyTorch-trained autoencoder combining audio features + genre embeddings. Includes **UMAP** dimensionality reduction (128D → 2D) for frontend visualization.
 
 ---
@@ -254,7 +254,7 @@ The system generates **128-dimensional embeddings per song** using a PyTorch-tra
   - 128 dimensions from genre embeddings (weighted average × 2.0 for songs with genres)
   
 - **Encoder**: 4 dense layers with LeakyReLU, BatchNorm, Dropout
-  - 137 → 256 → 256 → 128 → **64 (final embedding)**
+  - 137 → 256 → 256 → **128 (final embedding)**
   
 - **Decoder**: symmetric for reconstruction (64 → 128 → 256 → 256 → 137)
 

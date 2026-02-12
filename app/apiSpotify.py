@@ -140,7 +140,7 @@ async def main(datos, all_tracks, album_Res, track_Res, songs, embeddings, model
                 faileds.append(song)
         # Re-adding the tracks to remove those that failed
         all_tracks = [track for track in all_tracks if track not in faileds]
-        # Consult if there´s albums to cache
+        # Consult if there's albums to cache
         data, cached_albums = conn.consult_cached_albums([album[0] for album in album_ids])
         if data:
             print(f"Cached albums: \n{cached_albums}\nRepeated albums: {repeated_albums}")
@@ -222,6 +222,8 @@ async def main(datos, all_tracks, album_Res, track_Res, songs, embeddings, model
             try:
                 # Create the embedding of the iteration track
                 embedding = model.encode({spotify_id: datos[spotify_id]})
+                if embedding is None:
+                    raise "Embedding encoding error"
                 # Save it for the later 2D creation
                 embeddings.extend(embedding)
                 # Save in the dict to put in the database
@@ -265,13 +267,13 @@ async def getGrafo(playlist_id, sp, playlist_info, model):
     total_tracks = len(all_tracks)
     batch_size = config.MAX_CONCURRENT_TRACKS
     datos = {}
-    # This buffer it´s necessary for the UMAP model, and also saving the data to send each iteration all the new songs
+    # This buffer it's necessary for the UMAP model, and also saving the data to send each iteration all the new songs
     buffer_data = {'embeddings': [], 'data': {}}
-    data, cahed_names, invalid_songs, embeddings = (
+    data, cached_names, invalid_songs, embeddings = (
         conn.consult_cached_song([track['track']['id'] for track in all_tracks]))
     if data:
         all_tracks = [track for track in all_tracks if track['track']['name']
-                      not in cahed_names and track['track']['name'] not in invalid_songs]
+                      not in cached_names and track['track']['name'] not in invalid_songs]
         total_tracks = len(all_tracks)
         # Create embeddings for cached songs
         try:
@@ -281,14 +283,13 @@ async def getGrafo(playlist_id, sp, playlist_info, model):
             # The same with data, but with update to have all the data of each song
             buffer_data['data'].update(data)
             # Here always creates the 2d embeddings because it's the firsts batch
-            embeddings_2d = model.reduct(embeddings)  # Shape (batch_size, 2)
+            embeddings_2d = await asyncio.to_thread(model.reduct, embeddings)  # Shape (batch_size, 2)
         except Exception as e:
             print(f"Error while calculating embeddings: {e}")
-            embeddings_data = None
             embeddings_2d = None
         payload = create_payload(data, embeddings_2d)
         yield (json.dumps(payload) + "\n").encode("utf-8")
-        print(f"Cached songs: {cahed_names}")
+        print(f"Cached songs: {cached_names}")
     # Procesa las canciones en lotes de batch_size
     import time
     # Define how many iterations the 2D embeddings are created
@@ -306,15 +307,14 @@ async def getGrafo(playlist_id, sp, playlist_info, model):
             buffer_data['embeddings'].extend(embeddings)
             buffer_data['data'].update(datos)
             # Here to avoid recreating the 2D each batch, we create it every MIN_UMAP_SIZE batches
-            # It works if the min number of iterations, or there are not left track, so it´s the last iteration
+            # It works if the min number of iterations, or there are not left track, so it's the last iteration
             if iteration % MIN_UMAP_SIZE == 0 or left_tracks == 0:
                 # We create the 2D embeddings using all the embeddings
-                embeddings_2d = model.reduct(buffer_data['embeddings'])
+                embeddings_2d = await asyncio.to_thread(model.reduct, buffer_data['embeddings'])
             else:
                 embeddings_2d = None
         except Exception as e:
             print(f"Error while calculating embeddings: {e}")
-            embeddings_data = None
             embeddings_2d = None
         # The payload it's created using all the data and the fresh creates 2D embeddings
         payload = create_payload(buffer_data['data'], embeddings_2d)

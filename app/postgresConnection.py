@@ -38,7 +38,7 @@ class Connection:
             song['album_id'],
             json.dumps(song['artist_id']),
             song['embedding'],
-            config.SONG_EMBEDDING_VERSION
+            config.get_embedding_version()
         )
         self.cur.execute(query, values)
 
@@ -116,7 +116,8 @@ class Connection:
                 spotify_id = track[2]
 
                 if embedding_str is None:
-                    del cached[name]
+                    if name in cached:
+                        del cached[name]
                     invalid_songs.append(name)
                     print(f"No embedding found for song {name}, removing song.")
                     continue
@@ -130,7 +131,8 @@ class Connection:
             except Exception as e:
                 print(f"Error consulting the database: {e}")
                 invalid_songs.append(track[0])
-                del cached[track[0]]
+                if track[0] in cached:
+                    del cached[track[0]]
                 continue
         return cached, songs, invalid_songs, embeddings
 

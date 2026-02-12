@@ -7,6 +7,7 @@ load_dotenv()
 BACKEND_PORT = os.getenv('BACK_PORT')
 FRONTEND_PORT = os.getenv('FRONT_PORT')
 
+
 def configApp(app):
     app.add_middleware(
         CORSMiddleware,
@@ -39,5 +40,9 @@ class Config:
     album_url = 'https://api.deezer.com/album'
     MAX_CONCURRENT_TRACKS = 20
 
+    def get_embedding_version(self):
+        return self.SONG_EMBEDDING_VERSION
+    def set_embedding_version(self, version):
+        self.SONG_EMBEDDING_VERSION =version
 
 config = Config()
