@@ -285,7 +285,10 @@ async def getGrafo(playlist_id, sp, playlist_info, model):
             # The same with data, but with update to have all the data of each song
             buffer_data['data'].update(data)
             # Here always creates the 2d embeddings because it's the firsts batch
+            umap_start = time.time()
             embeddings_2d = await asyncio.to_thread(model.reduct, embeddings)  # Shape (batch_size, 2)
+            umap_end = time.time()
+            print(f"Umap took: {umap_end - umap_start} seconds for {len(embeddings)} to process")
         except Exception as e:
             print(f"Error while calculating embeddings: {e}")
             embeddings_2d = None
@@ -294,22 +297,30 @@ async def getGrafo(playlist_id, sp, playlist_info, model):
         print(f"Cached {len(cached_names)} songs, an average of {(len(cached_names)/real_total)*100:.1f}")
     # Define how many iterations the 2D embeddings are created
     MIN_UMAP_SIZE = 3
+    MIN_UMAP_BATCH_SIZE = batch_size* MIN_UMAP_SIZE
+    songs_without_2d = 0
     for i in range(0, total_tracks, batch_size):
         iteration = int(i / batch_size) + 1
         tmpTracks = all_tracks[i:i + batch_size]
         left_tracks = len(all_tracks[i + batch_size:])
         songs, datos, embeddings = await process_batch(datos, tmpTracks, album_Res, track_Res, model)
+        songs_without_2d += len(songs)
+        print(f"There are {len(songs)} processed")
         album_Res.clear()
         # Create embeddings for cached songs
         try:
             # Save the data and embeddings
             buffer_data['embeddings'].extend(embeddings)
             buffer_data['data'].update(datos)
-            # Here to avoid recreating the 2D each batch, we create it every MIN_UMAP_SIZE batches
-            # It works if the min number of iterations, or there are not left track, so it's the last iteration
-            if iteration % MIN_UMAP_SIZE == 0 or left_tracks == 0:
+            # It works by two main conditions
+            # if the batch is multiple of MIN_UMAP_SIZE and there are at least MIN_UMAP_BATCH_SIZE songs
+            # or, if it's the last iteration and at least are 1 song that has not been processed to 2D
+            if ((iteration % MIN_UMAP_SIZE == 0 and songs_without_2d >= MIN_UMAP_BATCH_SIZE) or
+                    (left_tracks == 0 and songs_without_2d > 0)):
+                # Using this condition we avoid useless executions of umap
                 # We create the 2D embeddings using all the embeddings
                 embeddings_2d = await asyncio.to_thread(model.reduct, buffer_data['embeddings'])
+                songs_without_2d = 0
             else:
                 embeddings_2d = None
         except Exception as e:
