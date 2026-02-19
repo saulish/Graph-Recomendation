@@ -10,7 +10,6 @@ def get_all_tracks(playlist_id, sp):
     tracks = []
     results = sp.playlist_tracks(playlist_id, limit=100)
     tracks.extend(results['items'])
-
     while results['next']:
         results = sp.next(results)
         tracks.extend(results['items'])
@@ -260,6 +259,7 @@ async def getGrafo(playlist_id, sp, playlist_info, model):
     track_Res = []
 
     all_tracks = get_all_tracks(playlist_id, sp)
+    real_total = len(all_tracks)
     # To remove if those songs are not valid
     dup_tracks = set()
     all_tracks = [t for t in all_tracks if t.get('track') is not None and t['track']['type'] != 'episode'
@@ -269,6 +269,8 @@ async def getGrafo(playlist_id, sp, playlist_info, model):
     datos = {}
     # This buffer it's necessary for the UMAP model, and also saving the data to send each iteration all the new songs
     buffer_data = {'embeddings': [], 'data': {}}
+    import time
+    start = time.time()
     data, cached_names, invalid_songs, embeddings = (
         conn.consult_cached_song([track['track']['id'] for track in all_tracks]))
     if data:
@@ -289,12 +291,9 @@ async def getGrafo(playlist_id, sp, playlist_info, model):
             embeddings_2d = None
         payload = create_payload(data, embeddings_2d)
         yield (json.dumps(payload) + "\n").encode("utf-8")
-        print(f"Cached songs: {cached_names}")
-    # Procesa las canciones en lotes de batch_size
-    import time
+        print(f"Cached {len(cached_names)} songs, an average of {(len(cached_names)/real_total)*100:.1f}")
     # Define how many iterations the 2D embeddings are created
     MIN_UMAP_SIZE = 3
-    start = time.time()
     for i in range(0, total_tracks, batch_size):
         iteration = int(i / batch_size) + 1
         tmpTracks = all_tracks[i:i + batch_size]
@@ -321,7 +320,7 @@ async def getGrafo(playlist_id, sp, playlist_info, model):
         yield (json.dumps(payload) + "\n").encode("utf-8")
     end = time.time()
     print("Fin del procesamiento de todas las canciones.")
-    print(f"Se procesaron {total_tracks} in {end - start:.4f} segundos.")
+    print(f"Se procesaron {real_total} in {end - start:.4f} segundos.")
     yield (json.dumps({"done": True}) + "\n").encode("utf-8")
 
 
