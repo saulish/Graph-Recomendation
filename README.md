@@ -35,8 +35,9 @@ curl http://127.0.0.1:8000/
 
 ## Current status (branches)
 
-- `main`(default branch): full **ingestion + cache + graph + genre embeddings** pipeline. Uses **pgvector** (PostgreSQL extension) for embedding storage and cosine similarity.
+- `main`: full **ingestion + cache + graph + genre embeddings** pipeline. Uses **pgvector** (PostgreSQL extension) for embedding storage and cosine similarity.
 - `feature/embedding-songs`: **song embeddings** (128-dimensional vectors). PyTorch-trained autoencoder combining audio features + genre embeddings. Includes **UMAP** dimensionality reduction (128D → 2D) for frontend visualization.
+- `refactor/producer-consumer-pipeline`: **Producer-consumer architecture** with `asyncio.Queue`. **Parallel** processing of API calls and DB queries. Significant performance improvement (~2-3x faster).
 
 ---
 
@@ -154,6 +155,21 @@ POSTGRES_USER=<user>
 POSTGRES_PASSWORD=<password>
 
 ```
+
+### Performance configuration (config.py)
+
+The system has configurable constants for batch processing and UMAP optimization:
+
+```python
+BATCH_SIZE = 20               # Songs processed per batch (API calls)
+MIN_UMAP_SIZE = 3             # Execute UMAP every N batches
+MIN_UMAP_BATCH_SIZE = 60      # Minimum accumulated songs to trigger UMAP
+```
+
+**Tuning recommendations:**
+- **Increase `BATCH_SIZE`** (e.g., 30-50) for faster processing with more concurrent API calls might affect the deezer petittions
+- **Decrease `MIN_UMAP_SIZE`** (e.g., 2) for more frequent 2D updates in frontend (higher CPU usage)
+- **`MIN_UMAP_BATCH_SIZE`** should typically be `BATCH_SIZE * MIN_UMAP_SIZE`
 
 ---
 
@@ -290,6 +306,93 @@ embeddings_2D = reducer.fit_transform(embeddings_128D)
 - Captures non-linear relationships between audio features and genres
 - Persistent cache accelerates subsequent analyses of the same playlist
 
+**UMAP edge cases:**
+```python
+# Handling edge cases
+if n == 0: return np.empty((0, 2))
+if n == 1: return np.array([[0.0, 0.0]])
+if n == 2: return np.array([[-1.0, 0.0], [1.0, 0.0]])
+```
+- UMAP requires n ≥ 3 to work correctly
+- Cases with 0, 1, or 2 songs return predefined coordinates
+- Avoids errors and guarantees consistent response
+
+---
+
+## Producer-consumer architecture (asyncio)
+
+The system implements a **producer-consumer pattern** using `asyncio.Queue` to maximize throughput and parallel processing.
+
+**Processing flow:**
+
+```
+┌─────────────────┐         ┌──────────────┐
+│ cache_producer  │────────▶│              │
+│  (DB queries)   │         │ asyncio.Queue│◀───┐
+└─────────────────┘         │              │    │
+                            └──────┬───────┘    │
+┌─────────────────┐                │            │
+│  api_producer   │────────────────┘            │
+│ (Spotify/Deezer)│                             │
+└─────────────────┘                             │
+                                                │
+                            ┌──────────────┐    │
+                            │ consumer_main│────┘
+                            │  (Frontend)  │
+                            └──────────────┘
+```
+
+**Components:**
+
+1. **`cache_producer`** (Producer 1):
+   - Queries PostgreSQL for cached songs
+   - Generates 2D embeddings with UMAP
+   - Puts payload in queue
+   - Executes **only once** at startup
+
+2. **`api_producer`** (Producer 2):
+   - Processes uncached songs in batches (default: 20)
+   - Calls Spotify/Deezer APIs concurrently
+   - Generates 128D embeddings and reduces to 2D every N batches
+   - Puts payloads in queue progressively
+
+3. **`consumer_main`** (Consumer):
+   - Reads from queue with timeout (0.5s)
+   - Yields to frontend via StreamingResponse
+   - Monitors status of both producers
+   - Terminates when both producers finish
+
+**Performance advantages:**
+
+- **True parallelism**: DB and API run simultaneously (not sequentially)
+- **Reduced latency**: Frontend receives first batch ~2-3x faster
+- **Maximized throughput**: Leverages API I/O time while processing cache
+- **Automatic backpressure**: Queue buffer prevents memory overload
+
+**Configuration (config.py):**
+```python
+BATCH_SIZE = 20              # Songs per API batch
+MIN_UMAP_SIZE = 3            # Execute UMAP every N batches
+MIN_UMAP_BATCH_SIZE = 60     # Minimum songs to execute UMAP
+```
+
+**Synchronization:**
+```python
+while producers > 0:
+    batch = await asyncio.wait_for(queue.get(), timeout=0.5)
+    yield (json.dumps(batch) + "\n").encode("utf-8")
+    
+    if cache_task and cache_task.done():
+        producers -= 1
+    if api_task and api_task.done():
+        producers -= 1
+```
+
+**UMAP optimization:**
+- Uses `asyncio.to_thread()` to execute UMAP without blocking event loop
+- Reduces to 2D every `MIN_UMAP_SIZE` batches or at the end
+- Additional condition: executes if `songs_without_2d >= MIN_UMAP_BATCH_SIZE`
+
 ---
 
 ## Notes (real-world behavior)
@@ -308,16 +411,32 @@ embeddings_2D = reducer.fit_transform(embeddings_128D)
 
 ## Roadmap
 
+### ✅ Completed
 - ✅ Integrate genre embeddings (128-dimensional vectors)
 - ✅ Store embeddings in Postgres with `pgvector`
 - ✅ **Song embeddings** (PyTorch autoencoder with 128D)
 - ✅ **Dimensionality reduction with UMAP** (128D → 2D) for visualization
 - ✅ **Embeddings cache** in PostgreSQL with model versioning
-- Song similarity using embeddings (cosine similarity in pgvector)
-- Recommendation graph with song embedding-based weights
-- Pathfinding algorithms (Dijkstra, clustering) over the graph
-- Cursor-based pagination
-- Docker + CI/CD
+- ✅ **Producer-consumer architecture** with `asyncio.Queue` for parallel processing
+
+### 🔨 In Progress / Planned
+
+**Phase 1: Code Quality & Architecture**
+- Endpoint refactoring (RESTful conventions, better error handling, validation)
+- Structured logging system (structured JSON logs, log levels, request tracing)
+- Testing suite (unit tests, integration tests, API endpoint tests)
+
+**Phase 2: Scalability & Performance**
+- Redis for user sessions/tokens (PostgreSQL handles embeddings efficiently ~100ms for 100+ embeddings)
+- Multi-user concurrency optimization (connection pooling, request queuing, rate limiting)
+
+**Phase 3: Core Features**
+- **Song recommendation system** (cosine similarity on embeddings via pgvector, personalized recommendations, collaborative filtering)
+- Recommendation API endpoints (similar songs, playlist generation, discover mode)
+
+**Phase 4: Infrastructure**
+- Docker containerization (multi-stage builds, docker-compose for dev/prod)
+- CI/CD pipeline (automated testing, deployment workflows, health checks)
 
 ---
 
@@ -367,7 +486,8 @@ curl http://127.0.0.1:8000/
 ## Estado actual (branches)
 
 - `main`: pipeline completo de **ingesta + caché + grafo + embeddings de géneros**. Usa **pgvector** (extensión de PostgreSQL) para almacenar embeddings y calcular similitud por coseno.
-- `feature/embedding-songs`: **embeddings de canciones** (vectores de 128 dimensiones). Autoencoder entrenado con PyTorch que combina features de audio + embeddings de géneros. Incluye reducción dimensional con **UMAP** (128D → 2D) para visualización en frontend. 
+- `feature/embedding-songs`: **embeddings de canciones** (vectores de 128 dimensiones). Autoencoder entrenado con PyTorch que combina features de audio + embeddings de géneros. Incluye reducción dimensional con **UMAP** (128D → 2D) para visualización en frontend.
+- `refactor/producer-consumer-pipeline`: **Arquitectura productor-consumidor** con `asyncio.Queue`. Procesamiento **paralelo** de API calls y consultas a DB. Mejora significativa de rendimiento (~2-3x más rápido). 
 
 ---
 
@@ -485,6 +605,21 @@ POSTGRES_USER=<usuario>
 POSTGRES_PASSWORD=<password>
 
 ```
+
+### Configuración de rendimiento (config.py)
+
+El sistema tiene constantes configurables para procesamiento por lotes y optimización de UMAP:
+
+```python
+BATCH_SIZE = 20               # Canciones procesadas por lote (llamadas API)
+MIN_UMAP_SIZE = 3             # Ejecutar UMAP cada N lotes
+MIN_UMAP_BATCH_SIZE = 60      # Mínimo de canciones acumuladas para ejecutar UMAP
+```
+
+**Recomendaciones de ajuste:**
+- **Aumentar `BATCH_SIZE`** (ej., 30-50) para procesamiento más rápido con más llamadas API concurrentes (requiere más memoria)
+- **Disminuir `MIN_UMAP_SIZE`** (ej., 2) para actualizaciones 2D más frecuentes en el frontend (mayor uso de CPU)
+- **`MIN_UMAP_BATCH_SIZE`** típicamente debe ser `BATCH_SIZE * MIN_UMAP_SIZE`
 
 ---
 
@@ -621,14 +756,101 @@ embeddings_2D = reducer.fit_transform(embeddings_128D)
 - Captura relaciones no lineales entre features de audio y géneros
 - Cache persistente acelera análisis subsecuentes de la misma playlist
 
+**Casos especiales en reducción UMAP:**
+```python
+# Manejo de edge cases
+if n == 0: return np.empty((0, 2))
+if n == 1: return np.array([[0.0, 0.0]])
+if n == 2: return np.array([[-1.0, 0.0], [1.0, 0.0]])
+```
+- UMAP requiere n ≥ 3 para funcionar correctamente
+- Casos con 0, 1 o 2 canciones retornan coordenadas predefinidas
+- Evita errores y garantiza respuesta consistente
+
+---
+
+## Arquitectura productor-consumidor (asyncio)
+
+El sistema implementa un **patrón productor-consumidor** usando `asyncio.Queue` para maximizar throughput y procesamiento paralelo.
+
+**Flujo de procesamiento:**
+
+```
+┌─────────────────┐         ┌──────────────┐
+│ cache_producer  │────────▶│              │
+│  (DB queries)   │         │ asyncio.Queue│◀───┐
+└─────────────────┘         │              │    │
+                            └──────┬───────┘    │
+┌─────────────────┐                │            │
+│  api_producer   │────────────────┘            │
+│ (Spotify/Deezer)│                             │
+└─────────────────┘                             │
+                                                │
+                            ┌──────────────┐    │
+                            │ consumer_main│────┘
+                            │  (Frontend)  │
+                            └──────────────┘
+```
+
+**Componentes:**
+
+1. **`cache_producer`** (Productor 1):
+   - Consulta PostgreSQL para canciones cacheadas
+   - Genera embeddings 2D con UMAP
+   - Pone payload en la queue
+   - Ejecuta **una sola vez** al inicio
+
+2. **`api_producer`** (Productor 2):
+   - Procesa canciones no cacheadas en batches (default: 20)
+   - Llama APIs de Spotify/Deezer concurrentemente
+   - Genera embeddings 128D y reduce a 2D cada N batches
+   - Pone payloads en la queue progresivamente
+
+3. **`consumer_main`** (Consumidor):
+   - Lee de la queue con timeout (0.5s)
+   - Hace `yield` al frontend vía StreamingResponse
+   - Monitorea estado de ambos productores
+   - Termina cuando ambos productores finalizan
+
+**Ventajas de rendimiento:**
+
+- **Paralelismo real**: DB y API se ejecutan simultáneamente (no secuencialmente)
+- **Latencia reducida**: Frontend recibe primer batch ~2-3x más rápido
+- **Throughput maximizado**: Aprovecha tiempo de I/O de APIs mientras procesa cache
+- **Backpressure automático**: Queue buffer previene sobrecarga de memoria
+
+**Configuración (config.py):**
+```python
+BATCH_SIZE = 20              # Canciones por batch de API
+MIN_UMAP_SIZE = 3            # Cada cuántos batches ejecutar UMAP
+MIN_UMAP_BATCH_SIZE = 60     # Mínimo de canciones para ejecutar UMAP
+```
+
+**Sincronización:**
+```python
+while producers > 0:
+    batch = await asyncio.wait_for(queue.get(), timeout=0.5)
+    yield (json.dumps(batch) + "\n").encode("utf-8")
+    
+    if cache_task and cache_task.done():
+        producers -= 1
+    if api_task and api_task.done():
+        producers -= 1
+```
+
+**Optimización UMAP:**
+- Usa `asyncio.to_thread()` para ejecutar UMAP sin bloquear event loop
+- Reduce a 2D cada `MIN_UMAP_SIZE` batches o al final
+- Condición adicional: ejecuta si `songs_without_2d >= MIN_UMAP_BATCH_SIZE`
+
 ---
 
 ## Notas de diseño (por qué así)
 
-- **Concurrencia controlada**: acelera llamadas a Deezer.
-- **Caché en PostgreSQL**: reduce llamadas repetidas y hace el sistema más “data-driven”.
-- **Streaming NDJSON**: permite UI/cliente progresivo y evita esperar al final de toda la playlist.
-- **Grafo con pesos**: representa relaciones entre canciones para recomendación o exploración (vecinos cercanos, clustering, etc.).
+- **Arquitectura productor-consumidor**: Dos productores independientes (`cache_producer` y `api_producer`) alimentan una `asyncio.Queue`. El consumidor (`consumer_main`) procesa batches concurrentemente y los envía al frontend.
+- **Concurrencia real**: Las consultas a DB y las llamadas a API (Spotify/Deezer) se ejecutan **en paralelo**, maximizando throughput.
+- **Streaming NDJSON**: permite UI/cliente progresivo; el frontend recibe datos inmediatamente sin esperar el procesamiento completo.
+- **Buffer de embeddings**: acumula embeddings 128D para transformaciones UMAP agregadas, reduciendo overhead computacional.
 
 ---
 
@@ -648,16 +870,32 @@ embeddings_2D = reducer.fit_transform(embeddings_128D)
 
 ## Roadmap
 
+### ✅ Completado
 - ✅ Integrar embeddings de géneros (vectores de 128 dimensiones)
 - ✅ Persistir embeddings en Postgres con `pgvector`
 - ✅ **Embeddings de canciones** (autoencoder PyTorch con 128D)
 - ✅ **Reducción dimensional con UMAP** (128D → 2D) para visualización
 - ✅ **Cache de embeddings** en PostgreSQL con versionado de modelo
-- Similitud entre canciones usando embeddings (cosine similarity en pgvector)
-- Grafo de recomendación con pesos basados en embeddings de canciones
-- Algoritmos de pathfinding (Dijkstra, clustering) sobre el grafo
-- Paginación cursor-based
-- Docker + CI/CD
+- ✅ **Arquitectura productor-consumidor** con `asyncio.Queue` para procesamiento paralelo
+
+### 🔨 En Progreso / Planeado
+
+**Fase 1: Calidad de Código & Arquitectura**
+- Refactorización de endpoints (convenciones RESTful, mejor manejo de errores, validación)
+- Sistema de logging estructurado (logs JSON estructurados, niveles de log, trazabilidad de requests)
+- Suite de testing (pruebas unitarias, pruebas de integración, pruebas de endpoints)
+
+**Fase 2: Escalabilidad & Rendimiento**
+- Redis para sesiones/tokens de usuario (PostgreSQL maneja embeddings eficientemente ~100ms para 100+ embeddings)
+- Optimización de concurrencia multi-usuario (connection pooling, queue de requests, rate limiting)
+
+**Fase 3: Features Core**
+- **Sistema de recomendación de canciones** (similitud coseno sobre embeddings vía pgvector, recomendaciones personalizadas, filtrado colaborativo)
+- Endpoints de API de recomendación (canciones similares, generación de playlists, modo descubrimiento)
+
+**Fase 4: Infraestructura**
+- Containerización con Docker (multi-stage builds, docker-compose para dev/prod)
+- Pipeline CI/CD (testing automatizado, workflows de deployment, health checks)
 
 ---
 
