@@ -131,15 +131,29 @@ class SongEncoderInference:
         return cosine_similarity(embedding1, embedding2)
 
     def reduct(self, embeddings):
+        n = len(embeddings)
+        # These are edge cases where umap cannot process them
+        if n == 0:
+            return np.empty((0, 2))
+        if n == 1:
+            return np.array([[0.0, 0.0]])
+        if n == 2:
+            return np.array([
+                [-1.0, 0.0],
+                [1.0, 0.0]
+            ])
+
+        # If it's >=3
+        n_neighbors = min(15, n - 1)
         reducer = umap.UMAP(
             n_components=2,
-            n_neighbors=min(15, len(embeddings) - 1),
+            n_neighbors=n_neighbors,
             min_dist=0.1,
             metric="cosine",
-            random_state=42
+            random_state=42,
+            init="random"
         )
-        embeddings_2D = reducer.fit_transform(embeddings)
-        return embeddings_2D
+        return reducer.fit_transform(embeddings)
 
 
 model = SongEncoderInference()
