@@ -7,7 +7,13 @@ import umap
 from app.config import config
 
 
+def similarity(embedding1, embedding2):
+    return cosine_similarity(embedding1, embedding2)
+
+
 class SongEncoderInference:
+    umap_fitted = False
+    umap_reducer = None
 
     def __init__(self, model_path='app/models/song_encoder.pth'):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -68,7 +74,8 @@ class SongEncoderInference:
                 bpm_val = float(bpm_val)
 
             # Extract numeric features in the EXACT ORDER of the checkpoint
-            # ['rank', 'popularity', 'duration', 'bpm', 'gain', 'album_type', 'number_songs', 'explicit', 'release_year']
+            # ['rank', 'popularity', 'duration', 'bpm', 'gain',
+            # 'album_type', 'number_songs', 'explicit', 'release_year']
             numeric_values = np.array([
                 float(song['rank']),
                 float(song['popularity']),
@@ -127,10 +134,7 @@ class SongEncoderInference:
 
         return embeddings
 
-    def similarity(self, embedding1, embedding2):
-        return cosine_similarity(embedding1, embedding2)
-
-    def reduct(self, embeddings):
+    def reduct(self, embeddings, fit: False):
         n = len(embeddings)
         # These are edge cases where umap cannot process them
         if n == 0:
@@ -143,17 +147,25 @@ class SongEncoderInference:
                 [1.0, 0.0]
             ])
 
-        # If it's >=3
-        n_neighbors = min(15, n - 1)
-        reducer = umap.UMAP(
-            n_components=2,
-            n_neighbors=n_neighbors,
-            min_dist=0.1,
-            metric="cosine",
-            random_state=42,
-            init="random"
-        )
-        return reducer.fit_transform(embeddings)
+        # The reason is avoiding training umap every use, instead, create and fit when receiving the fit parameter
+        # must be when config.MIN_FIT_SONGS is reached
+        if fit:
+            # If it's >=3
+            n_neighbors = min(15, n - 1)
+            reducer = umap.UMAP(
+                n_components=2,
+                n_neighbors=n_neighbors,
+                min_dist=0.1,
+                metric="cosine",
+                random_state=42,
+                init="random"
+            )
+            self.umap_reducer = reducer
+            self.umap_fitted = True
+            print(f"Starting fit reduction with {n} embeddings")
+            return self.umap_reducer.fit_transform(embeddings)
+        else:
+            return self.umap_reducer.transform(embeddings)
 
 
 model = SongEncoderInference()

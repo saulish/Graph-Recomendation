@@ -50,7 +50,7 @@ def fix_release_date(date):
     return date
 
 
-async def process_batch(datos, all_tracks, songs,  model):
+async def process_batch(datos, all_tracks, songs, model):
     embeddings = []
     max_concurrent_requests = math.ceil(len(all_tracks) / 10)
     semaphore = asyncio.Semaphore(max_concurrent_requests)
@@ -237,11 +237,14 @@ async def process_batch(datos, all_tracks, songs,  model):
     return songs, datos, embeddings
 
 
-async def cache_producer(embeddings, cached_data, model, queue):
+async def cache_producer(embeddings, cached_data, model, queue, full_cache=False):
     # Create embeddings for cached songs
     try:
-        # Here always creates the 2d embeddings because it's the firsts batch
-        embeddings_2d = await asyncio.to_thread(model.reduct, embeddings)  # Shape (batch_size, 2)
+        # Here if are at least MIN_FIT_SONGS cached, to avoid retraining umap every time
+        if (not model.umap_fitted and len(embeddings) >= config.MIN_FIT_SONGS) or full_cache:
+            embeddings_2d = await asyncio.to_thread(model.reduct, embeddings, True)  # Shape (batch_size, 2)
+        else:
+            embeddings_2d = None
     except Exception as e:
         print(f"Error while calculating embeddings in the cache producer: {e}")
         embeddings_2d = None
@@ -267,9 +270,13 @@ async def api_producer(total_tracks, all_tracks, all_data, model, buffer_data, q
             # or, if it's the last iteration and at least are 1 song that has not been processed to 2D
             if ((iteration % config.MIN_UMAP_SIZE == 0 or songs_without_2d >= config.MIN_UMAP_BATCH_SIZE) or
                     (left_tracks == 0 and songs_without_2d > 0)):
-                # Using this condition we avoid useless executions of umap
-                # We create the 2D embeddings using all the embeddings
-                embeddings_2d = await asyncio.to_thread(model.reduct, buffer_data['embeddings'])
+
+                # fit is used to avoid training umap every time, if in cache are not enough songs to train
+                # (MIN_FIT_SONGS), it waits until a batch is completed
+                # Also, do not need here check if are MIN_FIT_SONGS songs, because already is over MIN_UMAP_BATCH_SIZE
+                # ir it's the las iteration
+                fit = False if model.umap_fitted else False
+                embeddings_2d = await asyncio.to_thread(model.reduct, buffer_data['embeddings'], fit)
                 songs_without_2d = 0
             else:
                 embeddings_2d = None
@@ -304,7 +311,9 @@ async def consumer_main(all_tracks, real_total, model):
             buffer_data['embeddings'].extend(embeddings)
             # The same with data, but with update to have all the data of each song
             buffer_data['data'].update(cached_data)
-            cache_task = asyncio.create_task(cache_producer(embeddings, cached_data, model, queue))
+            print(f"Real total: {real_total}\nParcial total: {len(cached_names)}")
+            cache_task = asyncio.create_task(cache_producer(embeddings, cached_data,
+                                                            model, queue, real_total == len(cached_names)))
 
         except Exception as e:
             print(f"Error while adding embedding to the buffer {e}")

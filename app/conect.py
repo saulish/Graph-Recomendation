@@ -30,11 +30,11 @@ def get_all_tracks(token_info, playlist_id):
 
 def start_process(token_info, playlist_id, model):
     all_tracks = get_all_tracks(token_info, playlist_id)
-    real_total = len(all_tracks)
     # To remove if those songs are not valid
     dup_tracks = set()
     all_tracks = [t for t in all_tracks if t.get('track') is not None and t['track']['type'] != 'episode'
                   and t['track']['id'] not in dup_tracks and not dup_tracks.add(t['track']['id'])]
+    real_total = len(all_tracks)
     from .apiSpotify import consumer_main
     return consumer_main(all_tracks, real_total, model)
 

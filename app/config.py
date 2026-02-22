@@ -42,10 +42,13 @@ class Config:
     # Define how many iterations the 2D embeddings are created
     MIN_UMAP_SIZE = 3
     MIN_UMAP_BATCH_SIZE = BATCH_SIZE * MIN_UMAP_SIZE
+    MIN_FIT_SONGS = 40
 
     def get_embedding_version(self):
         return self.SONG_EMBEDDING_VERSION
+
     def set_embedding_version(self, version):
-        self.SONG_EMBEDDING_VERSION =version
+        self.SONG_EMBEDDING_VERSION = version
+
 
 config = Config()
