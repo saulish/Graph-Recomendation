@@ -218,17 +218,17 @@ async def process_batch(datos, all_tracks, songs, model):
                 embeddings.append(embedding)
                 # Save in the dict to put in the database
                 datos[spotify_id]['embedding'] = embedding
-                conn.insert_song(datos[spotify_id])
+                #conn.insert_song(datos[spotify_id])
                 if album_id in repeated_albums and 'song' in repeated_albums[album_id] and spotify_id in \
                         repeated_albums[album_id]['song']:
                     # The albums that were duplicated or cached should not be saved
                     print(f"Commited song {song_name}, but avoiding repeated album {album_name}")
                     continue  # If the song has a repeated album, do not commit the album and genree
                 print(f"Inserting {song_name} from the album {album_name} and the id {album_id}")
-                conn.insert_album(datos[spotify_id]['album'])
-                conn.insert_album_genres(datos[spotify_id]['album']['id'],
-                                         [genre['id'] for genre in datos[spotify_id]['album']['genres']])
-                conn.insert_genres(datos[spotify_id]['album']['genres'])
+                #conn.insert_album(datos[spotify_id]['album'])
+                #conn.insert_album_genres(datos[spotify_id]['album']['id'],
+                #                         [genre['id'] for genre in datos[spotify_id]['album']['genres']])
+                #conn.insert_genres(datos[spotify_id]['album']['genres'])
             except Exception as e:
                 print(f"Error while inserting data: {e}")
                 print(f"Commited song {song_name}, data:\n {datos[spotify_id]}\n{datos[spotify_id]['album']}\n")
@@ -266,7 +266,7 @@ async def api_producer(total_tracks, all_tracks, all_data, model, buffer_data, q
             buffer_data['embeddings'].extend(embeddings)
             buffer_data['data'].update(all_data)
             # It works by two main conditions
-            # if the batch is multiple of MIN_UMAP_SIZE and there are at least MIN_UMAP_BATCH_SIZE songs
+            # if the batch is multiple of MIN_UMAP_SIZE or there are at least MIN_UMAP_BATCH_SIZE songs without 2D
             # or, if it's the last iteration and at least are 1 song that has not been processed to 2D
             if ((iteration % config.MIN_UMAP_SIZE == 0 or songs_without_2d >= config.MIN_UMAP_BATCH_SIZE) or
                     (left_tracks == 0 and songs_without_2d > 0)):
@@ -275,7 +275,7 @@ async def api_producer(total_tracks, all_tracks, all_data, model, buffer_data, q
                 # (MIN_FIT_SONGS), it waits until a batch is completed
                 # Also, do not need here check if are MIN_FIT_SONGS songs, because already is over MIN_UMAP_BATCH_SIZE
                 # ir it's the las iteration
-                fit = False if model.umap_fitted else False
+                fit = not model.umap_fitted
                 embeddings_2d = await asyncio.to_thread(model.reduct, buffer_data['embeddings'], fit)
                 songs_without_2d = 0
             else:
@@ -290,7 +290,7 @@ async def api_producer(total_tracks, all_tracks, all_data, model, buffer_data, q
 
 
 async def consumer_main(all_tracks, real_total, model):
-    queue = asyncio.Queue()
+    queue = asyncio.Queue(maxsize=config.MAX_QUEUE_SIZE)
     total_tracks = len(all_tracks)
     all_data = {}
     # This buffer it's necessary for the UMAP model, and also saving the data to send each iteration all the new songs
@@ -323,6 +323,19 @@ async def consumer_main(all_tracks, real_total, model):
     # Create the task of the api query
     api_task = asyncio.create_task(api_producer(total_tracks, all_tracks, all_data, model, buffer_data, queue))
     producers = 2 if cache_task is not None else 1
+
+    # It's easier to move the logic into a small function, insted of duplicating code
+    def check_producers():
+        nonlocal cache_task, producers, api_task
+        if cache_task and cache_task.done():
+            # If are finished, we reduce a producer from the count
+            producers -= 1
+            # And mark it as None
+            cache_task = None
+        if api_task and api_task.done():
+            producers -= 1
+            api_task = None
+
     # The loop will run until both task finishes
     while producers > 0:
         try:
@@ -334,16 +347,9 @@ async def consumer_main(all_tracks, real_total, model):
             queue.task_done()
 
             # Then must check if the tasks still running
-            if cache_task and cache_task.done():
-                # If are finished, we reduce a producer from the count
-                producers -= 1
-                # And mark it as None
-                cache_task = None
-            if api_task and api_task.done():
-                producers -= 1
-                api_task = None
+            check_producers()
         except asyncio.TimeoutError:
-            pass
+            check_producers()
         except Exception as e:
             print(f"Error while producing: {e}")
 

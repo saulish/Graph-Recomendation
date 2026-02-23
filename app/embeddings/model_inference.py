@@ -12,10 +12,10 @@ def similarity(embedding1, embedding2):
 
 
 class SongEncoderInference:
-    umap_fitted = False
-    umap_reducer = None
 
     def __init__(self, model_path='app/models/song_encoder.pth'):
+        self.umap_fitted = False
+        self.umap_reducer = None
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         checkpoint = torch.load(model_path, map_location=self.device)
@@ -134,7 +134,7 @@ class SongEncoderInference:
 
         return embeddings
 
-    def reduct(self, embeddings, fit: False):
+    def reduct(self, embeddings, fit: bool = False):
         n = len(embeddings)
         # These are edge cases where umap cannot process them
         if n == 0:
@@ -147,9 +147,9 @@ class SongEncoderInference:
                 [1.0, 0.0]
             ])
 
-        # The reason is avoiding training umap every use, instead, create and fit when receiving the fit parameter
-        # must be when config.MIN_FIT_SONGS is reached
-        if fit:
+        # Separate fit logic, for the case when umap is not trained
+        def set_reducer():
+            nonlocal n
             # If it's >=3
             n_neighbors = min(15, n - 1)
             reducer = umap.UMAP(
@@ -163,8 +163,17 @@ class SongEncoderInference:
             self.umap_reducer = reducer
             self.umap_fitted = True
             print(f"Starting fit reduction with {n} embeddings")
+
+        # The reason is avoiding training umap every use, instead, create and fit when receiving the fit parameter
+        # must be when config.MIN_FIT_SONGS is reached
+        if fit:
+            set_reducer()
             return self.umap_reducer.fit_transform(embeddings)
         else:
+            if not self.umap_fitted:
+                set_reducer()
+                return self.umap_reducer.fit_transform(embeddings)
+
             return self.umap_reducer.transform(embeddings)
 
 

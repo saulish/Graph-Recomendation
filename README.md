@@ -167,7 +167,7 @@ MIN_UMAP_BATCH_SIZE = 60      # Minimum accumulated songs to trigger UMAP
 ```
 
 **Tuning recommendations:**
-- **Increase `BATCH_SIZE`** (e.g., 30-50) for faster processing with more concurrent API calls might affect the deezer petittions
+- **Increase `BATCH_SIZE`** (e.g., 30-50) for faster processing with more concurrent API calls might affect the deezer petitions
 - **Decrease `MIN_UMAP_SIZE`** (e.g., 2) for more frequent 2D updates in frontend (higher CPU usage)
 - **`MIN_UMAP_BATCH_SIZE`** should typically be `BATCH_SIZE * MIN_UMAP_SIZE`
 
