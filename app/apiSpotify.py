@@ -311,9 +311,9 @@ async def consumer_main(all_tracks, real_total, model):
             buffer_data['embeddings'].extend(embeddings)
             # The same with data, but with update to have all the data of each song
             buffer_data['data'].update(cached_data)
-            print(f"Real total: {real_total}\nParcial total: {len(cached_names)}")
+            fit = (real_total == len(cached_names)) or len(cached_names) >= config.MIN_FIT_SONGS
             cache_task = asyncio.create_task(cache_producer(embeddings, cached_data,
-                                                            model, queue, real_total == len(cached_names)))
+                                                            model, queue, fit))
 
         except Exception as e:
             print(f"Error while adding embedding to the buffer {e}")
