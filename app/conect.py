@@ -14,14 +14,29 @@ def getPlaylist(token_info):
     return playlists
 
 
-def getData(token_info, playlist_id, model):
+def get_all_tracks(token_info, playlist_id):
     if not token_info:
         return JSONResponse({"ok": False, "error": "invalid token"}, status_code=401)
     sp = spotipy.Spotify(auth=token_info['access_token'])
+    tracks = []
+    results = sp.playlist_items(playlist_id, limit=100)
+    tracks.extend(results['items'])
+    while results['next']:
+        results = sp.next(results)
+        tracks.extend(results['items'])
 
-    from .apiSpotify import getGrafo
-    playlist_info = sp.playlist(playlist_id)
-    return getGrafo(playlist_id, sp, playlist_info, model)
+    return tracks
+
+
+def start_process(token_info, playlist_id, model):
+    all_tracks = get_all_tracks(token_info, playlist_id)
+    # To remove if those songs are not valid
+    dup_tracks = set()
+    all_tracks = [t for t in all_tracks if t.get('track') is not None and t['track']['type'] != 'episode'
+                  and t['track']['id'] not in dup_tracks and not dup_tracks.add(t['track']['id'])]
+    real_total = len(all_tracks)
+    from .apiSpotify import consumer_main
+    return consumer_main(all_tracks, real_total, model)
 
 
 def login():

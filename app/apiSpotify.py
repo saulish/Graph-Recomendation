@@ -4,17 +4,7 @@ from .config import config
 from .postgresConnection import conn
 import aiohttp
 import json
-
-
-def get_all_tracks(playlist_id, sp):
-    tracks = []
-    results = sp.playlist_tracks(playlist_id, limit=100)
-    tracks.extend(results['items'])
-    while results['next']:
-        results = sp.next(results)
-        tracks.extend(results['items'])
-
-    return tracks
+import time
 
 
 async def fetch(session, track_name, semaphore):
@@ -60,7 +50,8 @@ def fix_release_date(date):
     return date
 
 
-async def main(datos, all_tracks, album_Res, track_Res, songs, embeddings, model):
+async def process_batch(datos, all_tracks, songs, model):
+    embeddings = []
     max_concurrent_requests = math.ceil(len(all_tracks) / 10)
     semaphore = asyncio.Semaphore(max_concurrent_requests)
     async with (aiohttp.ClientSession() as session):
@@ -108,7 +99,6 @@ async def main(datos, all_tracks, album_Res, track_Res, songs, embeddings, model
         for result, song in zip(results, all_tracks):  # Results of the search of search song
             try:
                 spotify_id = song['track']['id']
-                track_name = song['track']['name']
                 track_id = str(result['data'][0]['id'])
                 album_id = str(result['data'][0]['album']['id'])
                 artist_id = str(result['data'][0]['artist']['id'])
@@ -142,7 +132,7 @@ async def main(datos, all_tracks, album_Res, track_Res, songs, embeddings, model
         # Consult if there's albums to cache
         data, cached_albums = conn.consult_cached_albums([album[0] for album in album_ids])
         if data:
-            print(f"Cached albums: \n{cached_albums}\nRepeated albums: {repeated_albums}")
+            # print(f"Cached albums: \n{cached_albums}\nRepeated albums: {repeated_albums}")
             # Save the track names of those cached and duplicated songs
             track_id_cached = [track['track']['id'] for track in all_tracks if
                                (datos[track['track']['id']]['album']['id'] in repeated_albums
@@ -153,7 +143,6 @@ async def main(datos, all_tracks, album_Res, track_Res, songs, embeddings, model
                                 datos[track['track']['id']]['album']['id'] in cached_albums)
                                ]
             for spotify_id in track_id_cached:  # Iterate through the cached tracks
-                name = datos[spotify_id]['name']
                 album_id = datos[spotify_id]['album']['id']
                 if album_id in data:
                     # Means it's cached
@@ -223,116 +212,150 @@ async def main(datos, all_tracks, album_Res, track_Res, songs, embeddings, model
                 embedding = model.encode({spotify_id: datos[spotify_id]})
                 if embedding is None:
                     raise "Embedding encoding error"
+                # Transform into correct type
+                embedding = embedding.squeeze().tolist()
                 # Save it for the later 2D creation
-                embeddings.extend(embedding)
+                embeddings.append(embedding)
                 # Save in the dict to put in the database
-                datos[spotify_id]['embedding'] = embedding.squeeze().tolist()
-                conn.insert_song(datos[spotify_id])
+                datos[spotify_id]['embedding'] = embedding
+                #conn.insert_song(datos[spotify_id])
                 if album_id in repeated_albums and 'song' in repeated_albums[album_id] and spotify_id in \
                         repeated_albums[album_id]['song']:
                     # The albums that were duplicated or cached should not be saved
                     print(f"Commited song {song_name}, but avoiding repeated album {album_name}")
                     continue  # If the song has a repeated album, do not commit the album and genree
                 print(f"Inserting {song_name} from the album {album_name} and the id {album_id}")
-                conn.insert_album(datos[spotify_id]['album'])
-                conn.insert_album_genres(datos[spotify_id]['album']['id'],
-                                         [genre['id'] for genre in datos[spotify_id]['album']['genres']])
-                conn.insert_genres(datos[spotify_id]['album']['genres'])
+                #conn.insert_album(datos[spotify_id]['album'])
+                #conn.insert_album_genres(datos[spotify_id]['album']['id'],
+                #                         [genre['id'] for genre in datos[spotify_id]['album']['genres']])
+                #conn.insert_genres(datos[spotify_id]['album']['genres'])
             except Exception as e:
                 print(f"Error while inserting data: {e}")
                 print(f"Commited song {song_name}, data:\n {datos[spotify_id]}\n{datos[spotify_id]['album']}\n")
                 conn.rollback()
         conn.commit()
-    return datos, album_Res, track_Res
-
-
-async def process_batch(datos, tmp_tracks, album_res, track_res, model):
-    songs = []
-    embeddings = []
-    await main(datos, tmp_tracks, album_res, track_res, songs, embeddings, model)
     return songs, datos, embeddings
 
 
-async def getGrafo(playlist_id, sp, playlist_info, model):
-    n_playlist = playlist_info['tracks']['total']
-    album_Res = []
-    track_Res = []
+async def cache_producer(embeddings, cached_data, model, queue, full_cache=False):
+    # Create embeddings for cached songs
+    try:
+        # Here if are at least MIN_FIT_SONGS cached, to avoid retraining umap every time
+        if (not model.umap_fitted and len(embeddings) >= config.MIN_FIT_SONGS) or full_cache:
+            embeddings_2d = await asyncio.to_thread(model.reduct, embeddings, True)  # Shape (batch_size, 2)
+        else:
+            embeddings_2d = None
+    except Exception as e:
+        print(f"Error while calculating embeddings in the cache producer: {e}")
+        embeddings_2d = None
+    payload = create_payload(cached_data, embeddings_2d)
+    await queue.put(payload)
 
-    all_tracks = get_all_tracks(playlist_id, sp)
-    real_total = len(all_tracks)
-    # To remove if those songs are not valid
-    dup_tracks = set()
-    all_tracks = [t for t in all_tracks if t.get('track') is not None and t['track']['type'] != 'episode'
-                  and t['track']['id'] not in dup_tracks and not dup_tracks.add(t['track']['id'])]
+
+async def api_producer(total_tracks, all_tracks, all_data, model, buffer_data, queue):
+    songs_without_2d = 0
+    for i in range(0, total_tracks, config.BATCH_SIZE):
+        iteration = int(i / config.BATCH_SIZE) + 1
+        batch_tracks = all_tracks[i:i + config.BATCH_SIZE]
+        left_tracks = len(all_tracks[i + config.BATCH_SIZE:])
+        songs, all_data, embeddings = await process_batch(all_data, batch_tracks, [], model)
+        songs_without_2d += len(songs)
+        # Create embeddings for cached songs
+        try:
+            # Save the data and embeddings
+            buffer_data['embeddings'].extend(embeddings)
+            buffer_data['data'].update(all_data)
+            # It works by two main conditions
+            # if the batch is multiple of MIN_UMAP_SIZE or there are at least MIN_UMAP_BATCH_SIZE songs without 2D
+            # or, if it's the last iteration and at least are 1 song that has not been processed to 2D
+            if ((iteration % config.MIN_UMAP_SIZE == 0 or songs_without_2d >= config.MIN_UMAP_BATCH_SIZE) or
+                    (left_tracks == 0 and songs_without_2d > 0)):
+
+                # fit is used to avoid training umap every time, if in cache are not enough songs to train
+                # (MIN_FIT_SONGS), it waits until a batch is completed
+                # Also, do not need here check if are MIN_FIT_SONGS songs, because already is over MIN_UMAP_BATCH_SIZE
+                # ir it's the las iteration
+                fit = not model.umap_fitted
+                embeddings_2d = await asyncio.to_thread(model.reduct, buffer_data['embeddings'], fit)
+                songs_without_2d = 0
+            else:
+                embeddings_2d = None
+        except Exception as e:
+            print(f"Error while calculating embeddings in the api producer: {e}")
+            embeddings_2d = None
+        # The payload it's created using all the data and the fresh creates 2D embeddings
+        payload = create_payload(buffer_data['data'], embeddings_2d)
+        # The payload must be put in the queue to be processed
+        await queue.put(payload)
+
+
+async def consumer_main(all_tracks, real_total, model):
+    queue = asyncio.Queue(maxsize=config.MAX_QUEUE_SIZE)
     total_tracks = len(all_tracks)
-    batch_size = config.MAX_CONCURRENT_TRACKS
-    datos = {}
+    all_data = {}
     # This buffer it's necessary for the UMAP model, and also saving the data to send each iteration all the new songs
     buffer_data = {'embeddings': [], 'data': {}}
-    import time
     start = time.time()
-    data, cached_names, invalid_songs, embeddings = (
+    # Directly take the cached songs with all data because of the nice optimized db
+    cached_data, cached_names, invalid_songs, embeddings = (
         conn.consult_cached_song([track['track']['id'] for track in all_tracks]))
-    if data:
+    if cached_data:
+        # This way we separate how many songs are cached (in cached data) and the rest of them (all_tracks)
         all_tracks = [track for track in all_tracks if track['track']['name']
                       not in cached_names and track['track']['name'] not in invalid_songs]
         total_tracks = len(all_tracks)
-        # Create embeddings for cached songs
+        # Create the task of the cached songs
         try:
             # Here are the cached songs, so the ones with embedding
             # Saving the embeddings in a list, using extend to have it only in one list
             buffer_data['embeddings'].extend(embeddings)
             # The same with data, but with update to have all the data of each song
-            buffer_data['data'].update(data)
-            # Here always creates the 2d embeddings because it's the firsts batch
-            umap_start = time.time()
-            embeddings_2d = await asyncio.to_thread(model.reduct, embeddings)  # Shape (batch_size, 2)
-            umap_end = time.time()
-            print(f"Umap took: {umap_end - umap_start} seconds for {len(embeddings)} to process")
+            buffer_data['data'].update(cached_data)
+            fit = (real_total == len(cached_names)) or len(cached_names) >= config.MIN_FIT_SONGS
+            cache_task = asyncio.create_task(cache_producer(embeddings, cached_data,
+                                                            model, queue, fit))
+
         except Exception as e:
-            print(f"Error while calculating embeddings: {e}")
-            embeddings_2d = None
-        payload = create_payload(data, embeddings_2d)
-        yield (json.dumps(payload) + "\n").encode("utf-8")
-        print(f"Cached {len(cached_names)} songs, an average of {(len(cached_names)/real_total)*100:.1f}")
-    # Define how many iterations the 2D embeddings are created
-    MIN_UMAP_SIZE = 3
-    MIN_UMAP_BATCH_SIZE = batch_size* MIN_UMAP_SIZE
-    songs_without_2d = 0
-    for i in range(0, total_tracks, batch_size):
-        iteration = int(i / batch_size) + 1
-        tmpTracks = all_tracks[i:i + batch_size]
-        left_tracks = len(all_tracks[i + batch_size:])
-        songs, datos, embeddings = await process_batch(datos, tmpTracks, album_Res, track_Res, model)
-        songs_without_2d += len(songs)
-        print(f"There are {len(songs)} processed")
-        album_Res.clear()
-        # Create embeddings for cached songs
+            print(f"Error while adding embedding to the buffer {e}")
+            cache_task = None
+    else:
+        cache_task = None
+    # Create the task of the api query
+    api_task = asyncio.create_task(api_producer(total_tracks, all_tracks, all_data, model, buffer_data, queue))
+    producers = 2 if cache_task is not None else 1
+
+    # It's easier to move the logic into a small function, insted of duplicating code
+    def check_producers():
+        nonlocal cache_task, producers, api_task
+        if cache_task and cache_task.done():
+            # If are finished, we reduce a producer from the count
+            producers -= 1
+            # And mark it as None
+            cache_task = None
+        if api_task and api_task.done():
+            producers -= 1
+            api_task = None
+
+    # The loop will run until both task finishes
+    while producers > 0:
         try:
-            # Save the data and embeddings
-            buffer_data['embeddings'].extend(embeddings)
-            buffer_data['data'].update(datos)
-            # It works by two main conditions
-            # if the batch is multiple of MIN_UMAP_SIZE and there are at least MIN_UMAP_BATCH_SIZE songs
-            # or, if it's the last iteration and at least are 1 song that has not been processed to 2D
-            if ((iteration % MIN_UMAP_SIZE == 0 and songs_without_2d >= MIN_UMAP_BATCH_SIZE) or
-                    (left_tracks == 0 and songs_without_2d > 0)):
-                # Using this condition we avoid useless executions of umap
-                # We create the 2D embeddings using all the embeddings
-                embeddings_2d = await asyncio.to_thread(model.reduct, buffer_data['embeddings'])
-                songs_without_2d = 0
-            else:
-                embeddings_2d = None
+            # First takes the batch from the queue
+            batch = await asyncio.wait_for(queue.get(), timeout=0.5)
+            # Still using yield to send the batch
+            yield (json.dumps(batch) + "\n").encode("utf-8")
+            # Mark this as done
+            queue.task_done()
+
+            # Then must check if the tasks still running
+            check_producers()
+        except asyncio.TimeoutError:
+            check_producers()
         except Exception as e:
-            print(f"Error while calculating embeddings: {e}")
-            embeddings_2d = None
-        # The payload it's created using all the data and the fresh creates 2D embeddings
-        payload = create_payload(buffer_data['data'], embeddings_2d)
-        yield (json.dumps(payload) + "\n").encode("utf-8")
-    end = time.time()
-    print("Fin del procesamiento de todas las canciones.")
-    print(f"Se procesaron {real_total} in {end - start:.4f} segundos.")
+            print(f"Error while producing: {e}")
+
     yield (json.dumps({"done": True}) + "\n").encode("utf-8")
+    end = time.time()
+    print(f"{real_total} songs processed in {end - start:.2f} seconds.")
 
 
 def create_payload(data, embeddings_2d):

@@ -38,11 +38,18 @@ class Config:
     track_Url = 'https://api.deezer.com/track/'
     artist_url = 'https://api.deezer.com/artist'
     album_url = 'https://api.deezer.com/album'
-    MAX_CONCURRENT_TRACKS = 20
+    BATCH_SIZE = 20
+    # Define how many iterations the 2D embeddings are created
+    MIN_UMAP_SIZE = 3
+    MIN_UMAP_BATCH_SIZE = BATCH_SIZE * MIN_UMAP_SIZE
+    MIN_FIT_SONGS = 40
+    MAX_QUEUE_SIZE = 5
 
     def get_embedding_version(self):
         return self.SONG_EMBEDDING_VERSION
+
     def set_embedding_version(self, version):
-        self.SONG_EMBEDDING_VERSION =version
+        self.SONG_EMBEDDING_VERSION = version
+
 
 config = Config()
