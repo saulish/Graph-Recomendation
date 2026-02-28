@@ -5,6 +5,7 @@ from .postgresConnection import conn
 import aiohttp
 import json
 import time
+from app.schemas.response import SongAnalysisResponse
 
 
 async def fetch(session, track_name, semaphore):
@@ -218,17 +219,17 @@ async def process_batch(datos, all_tracks, songs, model):
                 embeddings.append(embedding)
                 # Save in the dict to put in the database
                 datos[spotify_id]['embedding'] = embedding
-                #conn.insert_song(datos[spotify_id])
+                conn.insert_song(datos[spotify_id])
                 if album_id in repeated_albums and 'song' in repeated_albums[album_id] and spotify_id in \
                         repeated_albums[album_id]['song']:
                     # The albums that were duplicated or cached should not be saved
                     print(f"Commited song {song_name}, but avoiding repeated album {album_name}")
                     continue  # If the song has a repeated album, do not commit the album and genree
                 print(f"Inserting {song_name} from the album {album_name} and the id {album_id}")
-                #conn.insert_album(datos[spotify_id]['album'])
-                #conn.insert_album_genres(datos[spotify_id]['album']['id'],
-                #                         [genre['id'] for genre in datos[spotify_id]['album']['genres']])
-                #conn.insert_genres(datos[spotify_id]['album']['genres'])
+                conn.insert_album(datos[spotify_id]['album'])
+                conn.insert_album_genres(datos[spotify_id]['album']['id'],
+                                         [genre['id'] for genre in datos[spotify_id]['album']['genres']])
+                conn.insert_genres(datos[spotify_id]['album']['genres'])
             except Exception as e:
                 print(f"Error while inserting data: {e}")
                 print(f"Commited song {song_name}, data:\n {datos[spotify_id]}\n{datos[spotify_id]['album']}\n")
@@ -370,4 +371,5 @@ def create_payload(data, embeddings_2d):
         }
         for i, song_id in enumerate(data)
     ]
+    SongAnalysisResponse(ok=True, playlists=payload)
     return payload

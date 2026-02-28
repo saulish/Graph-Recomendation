@@ -10,7 +10,10 @@ def getPlaylist(token_info):
     if not token_info:
         return RedirectResponse(config.backend_url + "")
     sp = spotipy.Spotify(auth=token_info['access_token'])
-    playlists = sp.current_user_playlists()
+    playlist_keys = ('name', 'description', 'public', 'collaborative', 'images', 'tracks', 'id')
+    playlists = [{k: d[k] for k in playlist_keys}
+                 for d in sp.current_user_playlists()['items']
+                 ]
     return playlists
 
 
