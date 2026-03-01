@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Request, Depends
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import RedirectResponse
 from app.config import config
 from app.conect import login, createAccesToken, getTokenInfo
 from app.schemas.response import LoginResponse, StandardResponse
@@ -10,7 +10,7 @@ router = APIRouter(prefix="/auth", tags=["authentication"])
 @router.get('/login')
 async def start(token_info: dict = Depends(getTokenInfo)):
     if token_info:  # If the token exists, send the logged to redirect the user to the app
-        return JSONResponse({"ok": True, "logged": True}, status_code=200)
+        return LoginResponse(ok=True, logged=True)
     else:
         url = login()
         return LoginResponse(ok=True, logged=False, auth_url=url)
@@ -30,6 +30,6 @@ async def callback(request: Request):
 
 
 @router.get('/logout')
-async def logout(request: Request,):
+async def logout(request: Request, ):
     request.session.clear()
     return StandardResponse(ok=True)

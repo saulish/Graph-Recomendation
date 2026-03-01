@@ -1,9 +1,10 @@
 import time
 import spotipy
 from fastapi import Request
-from fastapi.responses import RedirectResponse, JSONResponse
+from fastapi.responses import RedirectResponse
 from spotipy.oauth2 import SpotifyOAuth
 from .config import config
+from schemas.response import StandardResponse
 
 
 def getPlaylist(token_info):
@@ -19,7 +20,7 @@ def getPlaylist(token_info):
 
 def get_all_tracks(token_info, playlist_id):
     if not token_info:
-        return JSONResponse({"ok": False, "error": "invalid token"}, status_code=401)
+        return StandardResponse(ok=False, error="invalid token")
     sp = spotipy.Spotify(auth=token_info['access_token'])
     tracks = []
     results = sp.playlist_items(playlist_id, limit=100)
@@ -73,7 +74,7 @@ def createAccesToken(code):
     token_info = sp_oauth.get_access_token(code)
     access_token = token_info.get("access_token")
     if not access_token:
-        return JSONResponse({"error": "Access code failed"}, status_code=500)
+        return StandardResponse(error="Access code failed")
 
     return token_info
 
