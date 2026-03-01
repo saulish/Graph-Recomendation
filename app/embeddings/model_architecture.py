@@ -1,5 +1,6 @@
 import torch.nn as nn
 
+
 # Autoencoder model for song embeddings
 class SongAutoencoder(nn.Module):
     def __init__(self, input_dim=137, embedding_dim=64, hidden_dim=256):
@@ -50,5 +51,3 @@ class SongAutoencoder(nn.Module):
 
     def encode(self, x):
         return self.encoder(x)
-
-

@@ -1,10 +1,10 @@
 import asyncio
 import math
-from .config import config
-from .postgresConnection import conn
 import aiohttp
 import json
 import time
+from app.config import config
+from app.postgresConnection import conn
 from app.schemas.response import SongAnalysisResponse
 
 

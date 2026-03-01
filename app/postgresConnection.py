@@ -3,7 +3,8 @@ import json
 import psycopg2
 from psycopg2.extras import execute_values
 from dotenv import load_dotenv
-from .config import config
+from app.config import config
+
 
 class Connection:
     def __init__(self):

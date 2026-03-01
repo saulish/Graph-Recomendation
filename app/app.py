@@ -1,5 +1,5 @@
-from .config import configApp
 from fastapi import FastAPI
+from app.config import configApp
 from app.api.routes import auth, playlist, analysis
 
 

@@ -3,8 +3,8 @@ import spotipy
 from fastapi import Request
 from fastapi.responses import RedirectResponse
 from spotipy.oauth2 import SpotifyOAuth
-from .config import config
-from schemas.response import StandardResponse
+from app.config import config
+from app.schemas.response import StandardResponse
 
 
 def getPlaylist(token_info):
@@ -39,7 +39,7 @@ def start_process(token_info, playlist_id, model):
     all_tracks = [t for t in all_tracks if t.get('track') is not None and t['track']['type'] != 'episode'
                   and t['track']['id'] not in dup_tracks and not dup_tracks.add(t['track']['id'])]
     real_total = len(all_tracks)
-    from .apiSpotify import consumer_main
+    from app.apiSpotify import consumer_main
     return consumer_main(all_tracks, real_total, model)
 
 

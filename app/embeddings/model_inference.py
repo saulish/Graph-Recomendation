@@ -1,10 +1,10 @@
 import torch
-from .model_architecture import SongAutoencoder
-from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 import pandas as pd
 import umap
+from app.embeddings.model_architecture import SongAutoencoder
 from app.config import config
+from sklearn.metrics.pairwise import cosine_similarity
 
 
 def similarity(embedding1, embedding2):
