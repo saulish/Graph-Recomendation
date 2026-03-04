@@ -45,5 +45,4 @@ class SongAnalysisItem(BaseModel):
 # This is a list of analyzed songs, instead of being used in the response, is used in the creation of
 # the payload
 class SongAnalysisResponse(StandardResponse):
-    ok: bool
-    playlists: Optional[List[SongAnalysisItem]] = None
+    songs: Optional[List[SongAnalysisItem]] = None

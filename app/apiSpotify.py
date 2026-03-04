@@ -371,5 +371,5 @@ def create_payload(data, embeddings_2d):
         }
         for i, song_id in enumerate(data)
     ]
-    SongAnalysisResponse(ok=True, playlists=payload)
+    SongAnalysisResponse(ok=True, songs=payload)
     return payload
