@@ -5,7 +5,8 @@ import json
 import time
 from app.config import config
 from app.postgresConnection import conn
-from app.schemas.response import SongAnalysisResponse
+from app.schemas.response import SongAnalysisItem
+from pydantic import ValidationError
 
 
 async def fetch(session, track_name, semaphore):
@@ -359,16 +360,19 @@ async def consumer_main(all_tracks, real_total, model):
 
 
 def create_payload(data, embeddings_2d):
-    payload = [
-        {
-            'id': song_id,
-            'x': float(embeddings_2d[i][0]) if embeddings_2d is not None else None,
-            'y': float(embeddings_2d[i][1]) if embeddings_2d is not None else None,
-            'song_name': data[song_id]['name'],
-            'artists': data[song_id]['album']['artists'],
-            'album_name': data[song_id]['album']['name']
-        }
-        for i, song_id in enumerate(data)
-    ]
-    SongAnalysisResponse(ok=True, songs=payload)
-    return payload
+    validated_songs = []
+    for i, song_id in enumerate(data):
+        try:
+            song = SongAnalysisItem(
+                id=song_id,
+                x=float(embeddings_2d[i][0]) if embeddings_2d is not None else None,
+                y=float(embeddings_2d[i][1]) if embeddings_2d is not None else None,
+                song_name=data[song_id]['name'],
+                artists=data[song_id]['album']['artists'],
+                album_name=data[song_id]['album']['name']
+            )
+            validated_songs.append(song.model_dump())
+        except ValidationError as e:
+            print(f"Error while processing song {song_id}: {e}")
+            continue
+    return validated_songs
