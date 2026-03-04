@@ -32,7 +32,7 @@ async def fetch_album(session, albumID, semaphore):
                 return None
 
 
-async def fecth_track(session, trackID, semaphore):
+async def fetch_track(session, trackID, semaphore):
     async with semaphore:
         async with session.get(config.track_Url + "/" + str(trackID)) as response:
             if response.status == 200:
@@ -51,7 +51,7 @@ def fix_release_date(date):
     return date
 
 
-async def process_batch(datos, all_tracks, songs, model):
+async def process_batch(all_data, all_tracks, songs, model):
     embeddings = []
     max_concurrent_requests = math.ceil(len(all_tracks) / 10)
     semaphore = asyncio.Semaphore(max_concurrent_requests)
@@ -59,42 +59,42 @@ async def process_batch(datos, all_tracks, songs, model):
         tasks = []
         tasks_album = []
         tasks_track = []
-        faileds = []  # List to identify the searches that failed
+        search_errors = []  # List to identify the searches that failed
         for track in all_tracks:
             try:
                 track_name = track['track']['name']
                 track_id = track['track']['id']
                 songs.append(track_name)  # Maybe use {'id','name'} or something
-                datos[track_id] = {}
-                datos[track_id]['spotify_id'] = track_id
-                datos[track_id]["name"] = track_name
-                datos[track_id]['duration'] = track['track']['duration_ms']
-                datos[track_id]['explicit'] = track['track']['explicit']
-                datos[track_id]['popularity'] = track['track']['popularity']
+                all_data[track_id] = {}
+                all_data[track_id]['spotify_id'] = track_id
+                all_data[track_id]["name"] = track_name
+                all_data[track_id]['duration'] = track['track']['duration_ms']
+                all_data[track_id]['explicit'] = track['track']['explicit']
+                all_data[track_id]['popularity'] = track['track']['popularity']
 
-                datos[track_id]['album'] = {}
-                datos[track_id]['album']["type"] = track['track']['album']['album_type']
-                datos[track_id]['album']["total_tracks"] = track['track']['album']['total_tracks']
-                datos[track_id]['album']["name"] = track['track']['album']['name']
-                datos[track_id]['album']["release_date"] = fix_release_date(track['track']['album']['release_date'])
-                datos[track_id]['album']["artists"] = [artist['name'] for artist in track['track']['artists']]
-                search = f"{track_name} {", ".join(datos[track_id]['album']["artists"])}"
-                # Petición de búsqueda de la canción
+                all_data[track_id]['album'] = {}
+                all_data[track_id]['album']["type"] = track['track']['album']['album_type']
+                all_data[track_id]['album']["total_tracks"] = track['track']['album']['total_tracks']
+                all_data[track_id]['album']["name"] = track['track']['album']['name']
+                all_data[track_id]['album']["release_date"] = fix_release_date(track['track']['album']['release_date'])
+                all_data[track_id]['album']["artists"] = [artist['name'] for artist in track['track']['artists']]
+                search = f"{track_name} {", ".join(all_data[track_id]['album']["artists"])}"
+                # Track fetching
                 task = fetch(session, search, semaphore)
                 tasks.append(task)
             except Exception as e:
                 print(f"Error while taking data: {e}")
                 print(f"Probably song has not all the info")
                 print(f"Deleting: {track['track']['name']}")
-                del datos[track['track']['id']]
+                del all_data[track['track']['id']]
                 songs.pop(songs.index(track['track']['name']))
-                faileds.append(track)
+                search_errors.append(track)
 
         # Re-adding the tracks to remove those that failed
-        all_tracks = [track for track in all_tracks if track not in faileds]
+        all_tracks = [track for track in all_tracks if track not in search_errors]
         # Search of each song
         results = await asyncio.gather(*tasks)
-        faileds = []
+        search_errors = []
         album_ids = []  # List to separate the logic of the search and the album tasks
         repeated_albums = {}  # List of those albums that will not be saved, (for already being cached or duplicated)
         for result, song in zip(results, all_tracks):  # Results of the search of search song
@@ -104,13 +104,13 @@ async def process_batch(datos, all_tracks, songs, model):
                 album_id = str(result['data'][0]['album']['id'])
                 artist_id = str(result['data'][0]['artist']['id'])
                 # For some reason, deezer just gives me only the id of the first artist
-                datos[spotify_id]['deezer_id'] = track_id
-                datos[spotify_id]['album_id'] = album_id
-                datos[spotify_id]['album']['id'] = album_id
-                datos[spotify_id]['artist_id'] = artist_id
+                all_data[spotify_id]['deezer_id'] = track_id
+                all_data[spotify_id]['album_id'] = album_id
+                all_data[spotify_id]['album']['id'] = album_id
+                all_data[spotify_id]['artist_id'] = artist_id
 
                 # Creation of the tasks of the track petition
-                track_task = fecth_track(session, track_id, semaphore)
+                track_task = fetch_track(session, track_id, semaphore)
                 tasks_track.append(track_task)
                 # If the current id is in the list, means it's repeated
                 if album_id in [album[0] for album in album_ids]:
@@ -125,37 +125,36 @@ async def process_batch(datos, all_tracks, songs, model):
                 print(f"Error in search: {e}")
                 # If a search had no results, means the song does not exist, so it must be ignored
                 print(f"Deleting: {song['track']['name']}")
-                del datos[song['track']['id']]
+                del all_data[song['track']['id']]
                 songs.pop(songs.index(song['track']['name']))
-                faileds.append(song)
+                search_errors.append(song)
         # Re-adding the tracks to remove those that failed
-        all_tracks = [track for track in all_tracks if track not in faileds]
+        all_tracks = [track for track in all_tracks if track not in search_errors]
         # Consult if there's albums to cache
         data, cached_albums = conn.consult_cached_albums([album[0] for album in album_ids])
         if data:
-            # print(f"Cached albums: \n{cached_albums}\nRepeated albums: {repeated_albums}")
             # Save the track names of those cached and duplicated songs
             track_id_cached = [track['track']['id'] for track in all_tracks if
-                               (datos[track['track']['id']]['album']['id'] in repeated_albums
+                               (all_data[track['track']['id']]['album']['id'] in repeated_albums
                                 and track['track']['id']
-                                in repeated_albums[datos[track['track']['id']]['album']['id']]['song'])
+                                in repeated_albums[all_data[track['track']['id']]['album']['id']]['song'])
                                or
                                (track['track']['name'] for track in all_tracks if
-                                datos[track['track']['id']]['album']['id'] in cached_albums)
+                                all_data[track['track']['id']]['album']['id'] in cached_albums)
                                ]
             for spotify_id in track_id_cached:  # Iterate through the cached tracks
-                album_id = datos[spotify_id]['album']['id']
+                album_id = all_data[spotify_id]['album']['id']
                 if album_id in data:
                     # Means it's cached
                     # Save the cached where it belongs
-                    datos[spotify_id]['album']['genres'] = data[album_id]
+                    all_data[spotify_id]['album']['genres'] = data[album_id]
                     if album_id in repeated_albums:
                         # Means it's repeated and cached!!
                         # This parts checks if there's a repeated album with the same id just get cached
                         # Remember: repeated={'album id': 'song':['names'}, data={'id': [], 'genres' : []}
                         repeated_track_name = repeated_albums[album_id]['song']
                         for repeated in repeated_track_name:
-                            datos[repeated]['album']['genres'] = data[album_id]
+                            all_data[repeated]['album']['genres'] = data[album_id]
                     else:
                         # else it's here to initialize the list, it's repeated or not, needs to be in repeated_albums to
                         # be ignored later
@@ -184,13 +183,13 @@ async def process_batch(datos, all_tracks, songs, model):
                 spotify_id = track[1]
 
                 album_id = track[0]
-                datos[spotify_id]['album']['genres'] = [{'name': genero['name'], 'id': genero['id']}
-                                                        for genero in album_result['genres']['data']]
+                all_data[spotify_id]['album']['genres'] = [{'name': genre['name'], 'id': genre['id']}
+                                                           for genre in album_result['genres']['data']]
                 if album_id in repeated_albums:
                     # Here are fetched and duplicated albums
                     for dup_id in repeated_albums[album_id]['song']:
-                        datos[dup_id]['album']['genres'] = [{'name': genero['name'], 'id': genero['id']}
-                                                            for genero in album_result['genres']['data']]
+                        all_data[dup_id]['album']['genres'] = [{'name': genre['name'], 'id': genre['id']}
+                                                               for genre in album_result['genres']['data']]
             except Exception as e:
                 print(f"Error in album: {e}")
         # Fetching tracks petitions
@@ -199,18 +198,18 @@ async def process_batch(datos, all_tracks, songs, model):
             try:
                 # Saving the track taken from the api
                 spotify_id = track['track']['id']
-                song_name = datos[spotify_id]['name']
-                album_name = datos[spotify_id]['album']['name']
-                album_id = datos[spotify_id]['album']['id']
-                datos[spotify_id]['rank'] = track_result['rank']
-                datos[spotify_id]['album']['bpm'] = track_result['bpm']
-                datos[spotify_id]['album']['gain'] = track_result['gain']
+                song_name = all_data[spotify_id]['name']
+                album_name = all_data[spotify_id]['album']['name']
+                album_id = all_data[spotify_id]['album']['id']
+                all_data[spotify_id]['rank'] = track_result['rank']
+                all_data[spotify_id]['album']['bpm'] = track_result['bpm']
+                all_data[spotify_id]['album']['gain'] = track_result['gain']
             except Exception as e:
                 print(f"Error in track: {e}")
                 continue
             try:
                 # Create the embedding of the iteration track
-                embedding = model.encode({spotify_id: datos[spotify_id]})
+                embedding = model.encode({spotify_id: all_data[spotify_id]})
                 if embedding is None:
                     raise "Embedding encoding error"
                 # Transform into correct type
@@ -218,24 +217,24 @@ async def process_batch(datos, all_tracks, songs, model):
                 # Save it for the later 2D creation
                 embeddings.append(embedding)
                 # Save in the dict to put in the database
-                datos[spotify_id]['embedding'] = embedding
-                conn.insert_song(datos[spotify_id])
+                all_data[spotify_id]['embedding'] = embedding
+                conn.insert_song(all_data[spotify_id])
                 if album_id in repeated_albums and 'song' in repeated_albums[album_id] and spotify_id in \
                         repeated_albums[album_id]['song']:
                     # The albums that were duplicated or cached should not be saved
-                    print(f"Commited song {song_name}, but avoiding repeated album {album_name}")
-                    continue  # If the song has a repeated album, do not commit the album and genree
+                    print(f"Committed song {song_name}, but avoiding repeated album {album_name}")
+                    continue  # If the song has a repeated album, do not commit the album and genre
                 print(f"Inserting {song_name} from the album {album_name} and the id {album_id}")
-                conn.insert_album(datos[spotify_id]['album'])
-                conn.insert_album_genres(datos[spotify_id]['album']['id'],
-                                         [genre['id'] for genre in datos[spotify_id]['album']['genres']])
-                conn.insert_genres(datos[spotify_id]['album']['genres'])
+                conn.insert_album(all_data[spotify_id]['album'])
+                conn.insert_album_genres(all_data[spotify_id]['album']['id'],
+                                         [genre['id'] for genre in all_data[spotify_id]['album']['genres']])
+                conn.insert_genres(all_data[spotify_id]['album']['genres'])
             except Exception as e:
                 print(f"Error while inserting data: {e}")
-                print(f"Commited song {song_name}, data:\n {datos[spotify_id]}\n{datos[spotify_id]['album']}\n")
+                print(f"Committed song {song_name}, data:\n {all_data[spotify_id]}\n{all_data[spotify_id]['album']}\n")
                 conn.rollback()
         conn.commit()
-    return songs, datos, embeddings
+    return songs, all_data, embeddings
 
 
 async def cache_producer(embeddings, cached_data, model, queue, full_cache=False):
@@ -325,7 +324,7 @@ async def consumer_main(all_tracks, real_total, model):
     api_task = asyncio.create_task(api_producer(total_tracks, all_tracks, all_data, model, buffer_data, queue))
     producers = 2 if cache_task is not None else 1
 
-    # It's easier to move the logic into a small function, insted of duplicating code
+    # It's easier to move the logic into a small function, instead of duplicating code
     def check_producers():
         nonlocal cache_task, producers, api_task
         if cache_task and cache_task.done():

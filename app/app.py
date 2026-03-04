@@ -7,10 +7,10 @@ class App:
     def __call__(self):
         app = FastAPI()
         configApp(app)
-        self.defineRoutes(app)
+        self.define_routes(app)
         return app
 
-    def defineRoutes(self, app: FastAPI):
+    def define_routes(self, app: FastAPI):
         @app.get("/")
         async def saludo():
             return {"message": f'Alive and running'}

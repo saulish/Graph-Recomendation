@@ -156,7 +156,7 @@ GROUP BY a.album_id, a.name;
         for album in self.cur.fetchall():
             album_id = album[0]
             albums.append(album_id)
-            data[album_id] = [{'id': id, 'name': genre} for id, genre in zip(album[1], album[2])]
+            data[album_id] = [{'id': genre_id, 'name': genre} for genre_id, genre in zip(album[1], album[2])]
         return data, albums
 
     def consult_cosine_similarity(self, album_id_1, album_id_2):

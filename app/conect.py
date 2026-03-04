@@ -7,7 +7,7 @@ from app.config import config
 from app.schemas.response import StandardResponse
 
 
-def getPlaylist(token_info):
+def get_all_playlists(token_info):
     if not token_info:
         return RedirectResponse(config.backend_url + "")
     sp = spotipy.Spotify(auth=token_info['access_token'])
@@ -44,12 +44,12 @@ def start_process(token_info, playlist_id, model):
 
 
 def login():
-    sp_oauth = getOauth()
+    sp_oauth = get_oauth()
     auth_url = sp_oauth.get_authorize_url()
     return auth_url
 
 
-def getTokenInfo(request: Request):
+def get_token_info(request: Request):
     try:
         token_info = request.session["token_info"]
     except KeyError as e:
@@ -59,8 +59,8 @@ def getTokenInfo(request: Request):
         return None
 
     if token_info["expires_at"] - int(time.time()) < 60:
-        print("Experied token → refreshing...")
-        sp_oauth = getOauth()
+        print("Expired token → refreshing...")
+        sp_oauth = get_oauth()
         refreshed = sp_oauth.refresh_access_token(token_info["refresh_token"])
         token_info = refreshed
 
@@ -69,8 +69,8 @@ def getTokenInfo(request: Request):
     return token_info
 
 
-def createAccesToken(code):
-    sp_oauth = getOauth()
+def create_access_token(code):
+    sp_oauth = get_oauth()
     token_info = sp_oauth.get_access_token(code)
     access_token = token_info.get("access_token")
     if not access_token:
@@ -79,6 +79,6 @@ def createAccesToken(code):
     return token_info
 
 
-def getOauth():
+def get_oauth():
     return SpotifyOAuth(client_id=config.clientID, client_secret=config.secretID, redirect_uri=config.redirect_url,
                         show_dialog=True, scope=config.scope, cache_path=None)
