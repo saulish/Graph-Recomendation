@@ -1,7 +1,6 @@
 import time
 import spotipy
-from fastapi import Request
-from fastapi.responses import RedirectResponse
+from fastapi import Request, HTTPException
 from spotipy.oauth2 import SpotifyOAuth
 from app.config import config
 from app.schemas.response import StandardResponse
@@ -9,7 +8,7 @@ from app.schemas.response import StandardResponse
 
 def get_all_playlists(token_info):
     if not token_info:
-        return RedirectResponse(config.backend_url + "")
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
     sp = spotipy.Spotify(auth=token_info['access_token'])
     playlist_keys = ('name', 'description', 'public', 'collaborative', 'images', 'tracks', 'id')
     playlists = [{k: d[k] for k in playlist_keys}
