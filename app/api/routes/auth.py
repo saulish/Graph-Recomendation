@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import RedirectResponse
 from app.config import config
 from app.conect import login, create_access_token, get_token_info
@@ -20,18 +20,23 @@ async def start(request: Request):
 
 @router.get('/callback')
 async def callback(request: Request):
+
     params = dict(request.query_params)
     code = params.get("code")
     error = params.get("error")
     if error:
-        return {"error": error}
+        print(f"Error in callback: {error}")
+        raise HTTPException(status_code=500, detail="Failed callback")
 
     token_info = create_access_token(code)
+    if not token_info:
+        print(f"Not token info available")
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
     request.session["token_info"] = token_info
     return RedirectResponse(f"http://127.0.0.1:{config.FRONTEND_PORT}/menu.html")
 
 
-@router.get('/logout')
+@router.delete('/logout')
 async def logout(request: Request, ):
     request.session.clear()
     return StandardResponse(ok=True)

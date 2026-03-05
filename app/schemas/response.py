@@ -8,8 +8,8 @@ class StandardResponse(BaseModel):
     error: Optional[str] = None
 
 
-# Login response, extends the standard and adds i if the user is logged
-# if isn't, the auth url
+# Login response, extends StandardResponse and adds a `logged` flag
+# if the user is not logged in, includes an `auth_url` for authentication
 class LoginResponse(StandardResponse):
     logged: bool
     auth_url: Optional[str] = None

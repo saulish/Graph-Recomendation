@@ -73,7 +73,7 @@ def create_access_token(code):
     token_info = sp_oauth.get_access_token(code)
     access_token = token_info.get("access_token")
     if not access_token:
-        return StandardResponse(error="Access code failed")
+        return None
 
     return token_info
 
