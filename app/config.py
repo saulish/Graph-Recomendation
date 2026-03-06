@@ -31,7 +31,7 @@ class Config:
     SONG_EMBEDDING_VERSION = 0
     BACKEND_PORT = BACKEND_PORT
     FRONTEND_PORT = FRONTEND_PORT
-    redirect_url = f'http://127.0.0.1:{str(BACKEND_PORT)}/callback'
+    redirect_url = f'http://127.0.0.1:{str(BACKEND_PORT)}/auth/callback'
     scope = 'playlist-read-private'
     base_url = 'https://api.deezer.com/search'
     backend_url = f'http://127.0.0.1:{str(BACKEND_PORT)}/'

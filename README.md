@@ -1,971 +1,403 @@
-# Graph recomendation
+# Graph Recommendation - Spotify Playlist Analysis
 
-Backend to analyze Spotify playlists and build a **song similarity graph**, combining:
+**Backend API for analyzing Spotify playlists with song embeddings and similarity visualization**
 
-- Spotify OAuth (Spotipy)
-- Deezer enrichment (rank/BPM/gain/genres)
-- **Concurrency** (asyncio + aiohttp)
-- **Caching** in PostgreSQL (songs/albums/genres)
-- **Streaming** responses (NDJSON) to show progress by batches
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-green.svg)](https://fastapi.tiangolo.com/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16+-blue.svg)](https://www.postgresql.org/)
+
+## Features
+
+- **Spotify OAuth Integration** - Secure user authentication with Spotipy
+- **Song Embeddings** - 128D vectors via PyTorch autoencoder (audio + genre features)
+- **2D Visualization** - UMAP dimensionality reduction for interactive frontend
+- **Smart Caching** - PostgreSQL with pgvector for fast embedding lookups
+- **Parallel Processing** - Producer-consumer architecture with asyncio.Queue
+- **Streaming Responses** - NDJSON batches for progressive rendering
+- **Deezer Enrichment** - BPM, gain, rank, and genre data
 
 ---
 
-## Quickstart
+## Quick Start
 
-1) Start PostgreSQL and create the tables (see [db/schema.sql](db/schema.sql)).
-2) Create `app/.env` (see template in Configuration).
-3) Install dependencies and run:
+### Prerequisites
 
+- Python 3.10+ (3.11 recommended)
+- PostgreSQL 16+ with [pgvector extension](https://github.com/pgvector/pgvector)
+- Spotify Developer credentials ([Get them here](https://developer.spotify.com/dashboard))
+
+### Installation
+
+1. **Clone repository**:
+```bash
+git clone https://github.com/saulish/GR_back.git
+cd GR_back
+```
+
+2. **Install dependencies**:
 ```bash
 python -m venv .venv
 # Windows
 .\.venv\Scripts\activate
+# Linux/Mac
+source .venv/bin/activate
 
 pip install -r requirements.txt
+```
+
+3. **Setup database**:
+```bash
+# Create database
+createdb graph_recomendation
+
+# Run schema
+psql graph_recomendation < db/schema.sql
+```
+
+4. **Configure environment** (`app/.env`):
+```env
+SPOTIFY_API_KEY=your_client_id
+SPOTIFY_API_SECRET=your_client_secret
+
+FRONT_PORT=5500
+BACK_PORT=8000
+
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+POSTGRES_DB=graph_recomendation
+POSTGRES_USER=your_user
+POSTGRES_PASSWORD=your_password
+```
+
+5. **Run server**:
+```bash
 python run.py
 ```
 
-4) Check it’s alive:
-
+6. **Test**:
 ```bash
 curl http://127.0.0.1:8000/
+# Response: {"message":"Alive and running"}
 ```
 
 ---
 
-## Current status (branches)
+## API Endpoints
 
-- `main`: full **ingestion + cache + graph + genre embeddings** pipeline. Uses **pgvector** (PostgreSQL extension) for embedding storage and cosine similarity.
-- `feature/embedding-songs`: **song embeddings** (128-dimensional vectors). PyTorch-trained autoencoder combining audio features + genre embeddings. Includes **UMAP** dimensionality reduction (128D → 2D) for frontend visualization.
-- `refactor/producer-consumer-pipeline`: **Producer-consumer architecture** with `asyncio.Queue`. **Parallel** processing of API calls and DB queries. Significant performance improvement (~2-3x faster).
+### Authentication
+- `GET /auth/login` - Initiate OAuth or check session
+- `GET /auth/callback` - OAuth callback (redirects to frontend)
+- `DELETE /auth/logout` - Clear session
 
----
+### Playlists
+- `GET /playlists` - List user's Spotify playlists (requires auth)
 
-## What does it do?
+### Analysis
+- `GET /analysis/playlist/{id}` - Analyze playlist with embeddings (streaming NDJSON)
 
-1) User logs in with Spotify.
-2) Backend lists playlists; the user selects one.
-3) For that playlist:
-   - Fetches tracks from Spotify.
-   - Queries PostgreSQL to reuse cached data.
-   - For uncached tracks, it queries Deezer concurrently:
-     - search (`/search`) to map Spotify → Deezer IDs
-     - track (`/track/{id}`) for `rank`, `bpm`, `gain`
-     - album (`/album/{id}`) for genres (when not cached)
-   - Persists results in PostgreSQL (songs, albums, genres).
-4) Generates **128-dimensional song embeddings** using a PyTorch autoencoder that combines:
-   - Audio features: BPM, gain, duration, popularity, explicit, rank
-   - Album features: type, track count, release year
-   - **Weighted genre embeddings** (128D from album)
-5) Reduces dimensionality with **UMAP** (128D → 2D) for interactive frontend visualization.
-6) Streams results in **NDJSON** by batches with 2D coordinates (x, y) for each song enabling progressive rendering.
+### Health
+- `GET /` - Server status
+
+> **Full API documentation**: See [docs/api-reference.md](docs/api-reference.md) for detailed schemas and examples
 
 ---
 
-## API (FastAPI)
+## How It Works
 
-- `GET /` health check
-- `GET /login` starts OAuth (or confirms you are already logged in)
-- `GET /callback` OAuth callback, stores session and redirects to the frontend
-- `GET /playlists` lists user playlists
-- `POST /logout` clears session
-- `GET /analizePlaylist?id=<playlist_id>` analysis stream in NDJSON
+1. **User authenticates** with Spotify OAuth
+2. **Backend fetches** playlist tracks from Spotify API
+3. **Cache check**: Queries PostgreSQL for existing embeddings
+4. **Enrichment** (uncached tracks): Concurrent Deezer API calls for BPM, gain, genres
+5. **Embedding generation**: PyTorch autoencoder creates 128D vectors
+6. **Dimensionality reduction**: UMAP reduces to 2D for visualization
+7. **Streaming**: Progressive NDJSON batches sent to frontend
 
-### `/analizePlaylist` response (NDJSON)
+### Processing Flow
 
-The response is a stream of JSON lines (one JSON object per line). Each batch contains an array of songs with their 2D coordinates for visualization:
-
-```json
-[
-  {
-    "id": "<spotify_id>",
-    "x": 0.245,
-    "y": -0.832,
-    "song_name": "Track A",
-    "artists": ["Artist 1", "Artist 2"],
-    "album_name": "Album Name"
-  },
-  {
-    "id": "<spotify_id>",
-    "x": 1.123,
-    "y": 0.456,
-    "song_name": "Track B",
-    "artists": ["Artist 3"],
-    "album_name": "Another Album"
-  }
-]
+```
+User Request → cache_producer (DB) ─┐
+                                    ├─→ Queue → consumer_main → Frontend
+               api_producer (APIs) ─┘
+               
+- cache_producer: Instant results from cached songs
+- api_producer: Parallel Spotify/Deezer calls for uncached songs
+- Both feed into shared queue for streaming response
 ```
 
-**Notes on coordinates (x, y):**
-- Generated via **UMAP** (128D → 2D reduction) every 3 batches or in the final batch
-- Represent semantic similarity: nearby songs are more similar
-- `null` when not yet calculated in that specific batch
+> **Architecture details**: See [docs/architecture.md](docs/architecture.md)
 
-At the end:
+---
 
-```json
-{"done": true}
-```
+## Song Embeddings
+
+Each song is represented as a **128-dimensional vector** combining:
+
+| Feature Type | Dimensions | Source |
+|--------------|------------|--------|
+| Audio features | 9 | BPM, gain, duration, popularity, etc. |
+| Genre embeddings | 128 | Pre-trained genre vectors (weighted avg) |
+
+**Autoencoder architecture**:
+- Input: 137D (9 audio + 128 genre)
+- Encoder: Dense layers → **128D bottleneck**
+- Decoder: Symmetric reconstruction
+
+**UMAP reduction** (128D → 2D):
+- Enables interactive visualization
+- Preserves local/global structure
+- Optimized: Fit once, transform many (~10-50x faster)
+
+> **Technical details**: See [docs/embeddings.md](docs/embeddings.md)
 
 ---
 
 ## Frontend
 
-Reference frontend:
+This backend is designed for interactive visualization. Frontend repository:
 
-- https://github.com/saulish/Graph-Recomendation-Frontend
+**https://github.com/saulish/Graph-Recomendation-Frontend**
 
----
-
-## Requirements
-
-- Python 3.10+ (recommended 3.11)
-- PostgreSQL 13+
-- Spotify Developer credentials (Client ID/Secret)
-
----
-
-## Configuration (environment variables)
-
-This project uses `app/.env` (gitignored). Create it with:
-
-- `SPOTIFY_API_KEY`
-- `SPOTIFY_API_SECRET`
-- `FRONT_PORT`
-- `BACK_PORT`
-- `POSTGRES_HOST`
-- `POSTGRES_PORT`
-- `POSTGRES_DB`
-- `POSTGRES_USER`
-- `POSTGRES_PASSWORD`
-
-Suggested template for `app/.env`:
-
-```dotenv
-SPOTIFY_API_KEY=<your_spotify_client_id>
-SPOTIFY_API_SECRET=<your_spotify_client_secret>
-
-FRONT_PORT=5500
-BACK_PORT=8000
-
-POSTGRES_HOST=127.0.0.1
-POSTGRES_PORT=5432
-POSTGRES_DB=graph_recomendation
-POSTGRES_USER=<user>
-POSTGRES_PASSWORD=<password>
-
+**Response format** (NDJSON):
+```json
+[
+  {
+    "id": "spotify_track_id",
+    "x": 0.25,
+    "y": -0.83,
+    "song_name": "Track Name",
+    "artists": ["Artist 1"],
+    "album_name": "Album Name"
+  }
+]
+{"done": true}
 ```
 
-### Performance configuration (config.py)
+---
 
-The system has configurable constants for batch processing and UMAP optimization:
+## Configuration
+
+### Performance Tuning
+
+Edit `app/config.py` to adjust batch processing:
 
 ```python
-BATCH_SIZE = 20               # Songs processed per batch (API calls)
-MIN_UMAP_SIZE = 3             # Execute UMAP every N batches
-MIN_UMAP_BATCH_SIZE = 60      # Minimum accumulated songs to trigger UMAP
-MIN_FIT_SONGS = 40            # Minimum cached songs to train UMAP reducer
-MAX_QUEUE_SIZE = 5            # Maximum queue buffer size (backpressure control)
+BATCH_SIZE = 20              # Songs per API batch
+MIN_UMAP_SIZE = 3            # UMAP execution frequency
+MIN_UMAP_BATCH_SIZE = 60     # Min songs for UMAP
+MIN_FIT_SONGS = 40           # Min cached songs to train UMAP
+MAX_QUEUE_SIZE = 5           # Queue buffer size
 ```
 
-**Tuning recommendations:**
-- **Increase `BATCH_SIZE`** (e.g., 30-50) for faster processing with more concurrent API calls might affect the deezer petittions
-- **Decrease `MIN_UMAP_SIZE`** (e.g., 2) for more frequent 2D updates in frontend (higher CPU usage)
-- **`MIN_UMAP_BATCH_SIZE`** should typically be `BATCH_SIZE * MIN_UMAP_SIZE`
-- **`MIN_FIT_SONGS`** controls when UMAP is trained from cache (lower = faster initial training, higher = better reducer quality)
-- **`MAX_QUEUE_SIZE`** prevents memory overflow with slow consumers (lower = more backpressure, higher = more buffering)
-
----
-
-## Installation
-
-Install dependencies with `requirements.txt`:
-
-```bash
-python -m venv .venv
-# Windows
-.\.venv\Scripts\activate
-
-pip install -r requirements.txt
-```
+**Recommendations**:
+- Increase `BATCH_SIZE` for faster processing (watch for rate limits)
+- Decrease `MIN_UMAP_SIZE` for more frequent frontend updates
+- Adjust `MIN_FIT_SONGS` based on typical cache hit rate
 
 ---
 
 ## Database
 
-The schema is based on the provided dump (`gr_schema.sql`). For convenience, a portable version exists at [db/schema.sql](db/schema.sql).
+The system uses PostgreSQL with **pgvector extension** for embedding storage and similarity queries.
 
-Main tables:
+### Key Tables
 
-- `albums` — album metadata (BPM, gain, release date, etc.)
-- `songs_data` — cached Spotify tracks with Deezer enrichment + **128D embeddings** and model version
-- `genres` — genre catalog with **128-dimensional embeddings** (via pgvector)
-- `album_genres` — **many-to-many** relationship (album ↔ genres) for optimized joins
-- `artists` (present in the schema; not actively used yet)
+| Table | Purpose |
+|-------|---------|
+| `songs_data` | Cached songs with 128D embeddings |
+| `albums` | Album metadata (BPM, gain, genres) |
+| `genres` | Genre catalog with 128D embeddings |
+| `album_genres` | Many-to-many album ↔ genres |
 
-Notes:
+### pgvector Usage
 
-- `albums.genres_id` is stored as JSONB (array of genre IDs) for backward compatibility.
-- **`album_genres` table** (many-to-many) is now used for efficient joins with `genres` (including embeddings).
-- **pgvector extension** is installed in PostgreSQL. Both `genres` and `songs_data` tables have `vector(128)` columns for embeddings.
-- **Embeddings cache**: `songs_data.embedding` stores pre-computed vectors to avoid regeneration in subsequent analyses.
-- `embedding_ver` tracks model version to invalidate cache when the model is updated.
+```sql
+-- Find similar songs via cosine similarity
+SELECT name, 1 - (embedding <=> target_embedding) AS similarity
+FROM songs_data
+ORDER BY embedding <=> target_embedding
+LIMIT 10;
+```
+
+> **Database details**: See [docs/database.md](docs/database.md) for schema and optimization
 
 ---
 
-## Run (dev)
+## Project Structure
 
-Primary way to run is `run.py` (it already starts Uvicorn):
+```
+app/
+├── api/
+│   └── routes/
+│       ├── auth.py          # Authentication endpoints
+│       ├── playlist.py      # Playlist management
+│       └── analysis.py      # Song analysis
+├── core/
+│   └── dependencies.py      # Dependency injection (auth)
+├── schemas/
+│   └── response.py          # Pydantic response models
+├── embeddings/
+│   ├── model_architecture.py
+│   └── model_inference.py   # PyTorch autoencoder + UMAP
+├── models/
+│   └── song_encoder.pth     # Trained model weights
+├── app.py                   # Main FastAPI application
+├── config.py                # Configuration & middleware
+├── conect.py                # Spotify/Deezer API logic
+├── apiSpotify.py            # Producer-consumer implementation
+└── postgresConnection.py    # Database connection
+
+db/
+└── schema.sql               # PostgreSQL schema with pgvector
+
+docs/
+├── architecture.md          # Producer-consumer & UMAP optimization
+├── embeddings.md            # Song/genre embeddings technical details
+├── api-reference.md         # Complete API documentation
+└── database.md              # PostgreSQL schema & pgvector usage
+```
+
+---
+
+## Development
+
+### Interactive API Docs
+
+FastAPI provides auto-generated documentation:
+
+- **Swagger UI**: http://127.0.0.1:8000/docs
+- **ReDoc**: http://127.0.0.1:8000/redoc
+
+### Running Tests
 
 ```bash
-python run.py
+# TODO: Add test suite (Phase 1 roadmap)
+pytest tests/
 ```
 
-By default, the callback redirects to `http://127.0.0.1:<FRONT_PORT>/menu.html`.
+### Code Quality
 
-CORS:
-- Allowed origin is `http://127.0.0.1:<FRONT_PORT>`.
-
----
-
-## Architecture (overview)
-
-![Architecture diagram](docs/architecture_eng.svg)
-
----
-
-## Genre embeddings & pgvector
-
-The system uses **128-dimensional genre embeddings** to compute semantic similarity between albums based on their musical genres. This enables the recommendation engine to understand genre relationships beyond simple exact matches.
-
-**Key implementation details:**
-
-1. **Vector storage**: The `genres` table includes an `embedding` column of type `vector(128)` using PostgreSQL's **pgvector extension**.
-
-2. **Many-to-many relationships**: The `album_genres` table links albums to multiple genres (an album can have several genres, a genre can belong to many albums).
-
-3. **Cosine similarity in SQL**: The function `consult_cosine_similarity(album_id_1, album_id_2)` computes the **average embedding vector** for all genres of each album, then calculates cosine similarity using pgvector's `<=>` operator:
-   ```sql
-   SELECT 1 - (avg_emb_1 <=> avg_emb_2) AS cosine_similarity
-   ```
-
-4. **Graph weights**: In `graph.py`, the `compareSongs()` function calls `consult_cosine_similarity()` and adds the result to edge weights:
-   ```python
-   embeddings_diff = conn.consult_cosine_similarity(album_id_1, album_id_2)
-   w += int((embeddings_diff + 0.5) * w)
-   ```
-
-5. **Benefits**: This approach allows the system to understand that "jazz" and "blues" are semantically closer than "jazz" and "death metal", improving recommendation quality by leveraging pre-trained genre embeddings.
-
-**pgvector setup:**
-- Requires PostgreSQL 16+ with the pgvector extension compiled for your platform (Windows builds available).
-- See `db/schema.sql` for the complete schema including indexes optimized for vector operations.
-
----
-
-## Song embeddings (autoencoder + UMAP)
-
-The system generates **128-dimensional embeddings per song** using a PyTorch-trained neural autoencoder, combining audio features with genre embeddings to capture multidimensional similarity.
-
-**Model architecture:**
-
-- **Input**: 137 dimensions
-  - 9 numeric features: rank, popularity, duration, BPM, gain, album_type, number_songs, explicit, release_year
-  - 128 dimensions from genre embeddings (weighted average × 2.0 for songs with genres)
-  
-- **Encoder**: 4 dense layers with LeakyReLU, BatchNorm, Dropout
-  - 137 → 256 → 256 → **128 (final embedding)**
-  
-- **Decoder**: symmetric for reconstruction (64 → 128 → 256 → 256 → 137)
-
-**Preprocessing:**
-- StandardScaler for numeric feature normalization
-- Imputation for missing values (especially BPM)
-- Differential weighting for songs without genres (embedding × 0.1 vs × 2.0)
-
-**Dimensionality reduction with UMAP:**
-```python
-reducer = umap.UMAP(
-    n_components=2,
-    n_neighbors=15,
-    min_dist=0.1,
-    metric="cosine",
-    random_state=42
-)
-embeddings_2D = reducer.fit_transform(embeddings_128D)
-```
-
-**Performance optimization:**
-- **UMAP trained only once**: After initial fit, only `transform()` is called (~10-50x faster)
-- Minimum `MIN_FIT_SONGS` (40) cached songs required to train reducer
-- 2D embeddings generated every 3 batches or when batch accumulates ≥60 songs
-- Buffer accumulates 128D embeddings for aggregate transformation
-- Uses `asyncio.to_thread()` to avoid blocking event loop
-
-**PostgreSQL cache:**
-- Column `songs_data.embedding` (128D vector) stores pre-computed embeddings
-- `embedding_ver` invalidates cache when model is updated
-- Cached songs generate 2D embeddings immediately in the first batch
-
-**Benefits:**
-- Interactive 2D visualization where distance represents semantic similarity
-- Captures non-linear relationships between audio features and genres
-- Persistent cache accelerates subsequent analyses of the same playlist
-
-**UMAP edge cases:**
-```python
-# Handling edge cases
-if n == 0: return np.empty((0, 2))
-if n == 1: return np.array([[0.0, 0.0]])
-if n == 2: return np.array([[-1.0, 0.0], [1.0, 0.0]])
-```
-- UMAP requires n ≥ 3 to work correctly
-- Cases with 0, 1, or 2 songs return predefined coordinates
-- Avoids errors and guarantees consistent response
-
----
-
-## Producer-consumer architecture (asyncio)
-
-The system implements a **producer-consumer pattern** using `asyncio.Queue` to maximize throughput and parallel processing.
-
-**Processing flow:**
-
-```
-┌─────────────────┐         ┌──────────────┐
-│ cache_producer  │────────▶│              │
-│  (DB queries)   │         │ asyncio.Queue│◀───┐
-└─────────────────┘         │              │    │
-                            └──────┬───────┘    │
-┌─────────────────┐                │            │
-│  api_producer   │────────────────┘            │
-│ (Spotify/Deezer)│                             │
-└─────────────────┘                             │
-                                                │
-                            ┌──────────────┐    │
-                            │ consumer_main│────┘
-                            │  (Frontend)  │
-                            └──────────────┘
-```
-
-**Components:**
-
-1. **`cache_producer`** (Producer 1):
-   - Queries PostgreSQL for cached songs
-   - Generates 2D embeddings with UMAP
-   - Puts payload in queue
-   - Executes **only once** at startup
-
-2. **`api_producer`** (Producer 2):
-   - Processes uncached songs in batches (default: 20)
-   - Calls Spotify/Deezer APIs concurrently
-   - Generates 128D embeddings and reduces to 2D every N batches
-   - Puts payloads in queue progressively
-
-3. **`consumer_main`** (Consumer):
-   - Reads from queue with timeout (0.5s)
-   - Yields to frontend via StreamingResponse
-   - Monitors status of both producers
-   - Terminates when both producers finish
-
-**Performance advantages:**
-
-- **True parallelism**: DB and API run simultaneously (not sequentially)
-- **Reduced latency**: Frontend receives first batch ~2-3x faster
-- **Maximized throughput**: Leverages API I/O time while processing cache
-- **Automatic backpressure**: Queue buffer prevents memory overload
-
-**Configuration (config.py):**
-```python
-BATCH_SIZE = 20              # Songs per API batch
-MIN_UMAP_SIZE = 3            # Execute UMAP every N batches
-MIN_UMAP_BATCH_SIZE = 60     # Minimum songs to execute UMAP
-MIN_FIT_SONGS = 40           # Minimum cached songs to train UMAP
-MAX_QUEUE_SIZE = 5           # Queue buffer size limit
-```
-
-**Synchronization:**
-```python
-while producers > 0:
-    batch = await asyncio.wait_for(queue.get(), timeout=0.5)
-    yield (json.dumps(batch) + "\n").encode("utf-8")
-    
-    if cache_task and cache_task.done():
-        producers -= 1
-    if api_task and api_task.done():
-        producers -= 1
-```
-
-**UMAP optimization (critical performance improvement):**
-
-The system now **trains UMAP only ONCE** and reuses the fitted reducer for all subsequent transformations:
-
-1. **Training decision** (`cache_producer`):
-   - Trains if 100% of songs are cached (`full_cache=True`)
-   - OR trains if cache has ≥ `MIN_FIT_SONGS` (40) songs
-   - Training uses `fit_transform()`
-
-2. **Subsequent transformations** (`api_producer`):
-   - After initial training, only calls `transform()` on new embeddings
-   - Checks `model.umap_fitted` flag to avoid retraining
-   - **~10-50x faster** than retraining every batch
-
-3. **Persistent reducer**:
-   ```python
-   # First time (training)
-   self.umap_reducer.fit_transform(embeddings)  # Slow
-   self.umap_fitted = True
-   
-   # All subsequent calls (transformation only)
-   self.umap_reducer.transform(new_embeddings)  # Fast!
-   ```
-
-**Performance impact:**
-- **Old behavior**: UMAP trained every `MIN_UMAP_BATCH_SIZE` (60) songs (~2-3s per training)
-- **New behavior**: UMAP trained **once**, then only transform (~0.1-0.2s per transformation)
-- **Result**: ~90% reduction in UMAP overhead for large playlists
-
----
-
-## Notes (real-world behavior)
-
-- Spotify: non-processable items may appear (podcasts/episodes, removed tracks, incomplete metadata). They are filtered/skipped when needed.
-- Deezer: some searches return no results or incomplete payloads; tracks are skipped to keep the pipeline moving.
-- Performance: processing runs in **batches** (default 20 tracks) with controlled concurrency to maximize throughput without saturating the API.
-
-### Cache strategy (what matters)
-
-- Caches **full songs** (`songs_data`) and **albums** (`albums`) to avoid redundant API calls.
-- Detects repeated albums inside the playlist to avoid fetching/saving the same album multiple times.
-- Stores genres in `genres` and links them via `albums.genres_id` (JSONB) for quick reconstruction.
+Recent refactoring improvements:
+- Modular endpoints with APIRouter (auth, playlists, analysis)
+- Pydantic schemas for validation and error handling
+- Dependency injection for authentication
+- Standardized error responses
 
 ---
 
 ## Roadmap
 
-### ✅ Completed
-- ✅ Integrate genre embeddings (128-dimensional vectors)
-- ✅ Store embeddings in Postgres with `pgvector`
-- ✅ **Song embeddings** (PyTorch autoencoder with 128D)
-- ✅ **Dimensionality reduction with UMAP** (128D → 2D) for visualization
-- ✅ **Embeddings cache** in PostgreSQL with model versioning
-- ✅ **Producer-consumer architecture** with `asyncio.Queue` for parallel processing
+### Completed
 
-### 🔨 In Progress / Planned
+- Spotify OAuth with session management
+- Song embeddings (PyTorch autoencoder + UMAP)
+- Genre embeddings with pgvector
+- Producer-consumer parallel processing
+- PostgreSQL caching with model versioning
+- Endpoint refactoring (modular structure)
+- Pydantic schemas & dependency injection
 
-**Phase 1: Code Quality & Architecture**
-- Endpoint refactoring (RESTful conventions, better error handling, validation)
-- Structured logging system (structured JSON logs, log levels, request tracing)
-- Testing suite (unit tests, integration tests, API endpoint tests)
+### In Progress
 
-**Phase 2: Scalability & Performance**
-- Redis for user sessions/tokens (PostgreSQL handles embeddings efficiently ~100ms for 100+ embeddings)
-- Multi-user concurrency optimization (connection pooling, request queuing, rate limiting)
+**Phase 1: Testing & Logging**
+- [ ] Structured logging (JSON logs with request tracing)
+- [ ] Test suite (unit, integration, endpoint tests)
 
-**Phase 3: Core Features**
-- **Song recommendation system** (cosine similarity on embeddings via pgvector, personalized recommendations, collaborative filtering)
-- Recommendation API endpoints (similar songs, playlist generation, discover mode)
+**Phase 2: Scalability**
+- [ ] Redis for session storage (multi-instance support)
+- [ ] Connection pooling optimization
+- [ ] Rate limiting for API endpoints
+
+**Phase 3: Recommendations**
+- [ ] Song recommendation system (cosine similarity)
+- [ ] Similar songs endpoint
+- [ ] Playlist generation based on seed songs
 
 **Phase 4: Infrastructure**
-- Docker containerization (multi-stage builds, docker-compose for dev/prod)
-- CI/CD pipeline (automated testing, deployment workflows, health checks)
+- [ ] Docker containerization
+- [ ] CI/CD pipeline (automated testing & deployment)
+- [ ] Production-ready configuration
 
 ---
 
 ## Troubleshooting
 
-- `invalid token`: check cookies/session and ensure the frontend origin matches CORS settings.
-- DB errors: confirm tables exist and `app/.env` points to the correct database.
-- Deezer empty results: search depends on the query string (`"track + artists"`); some tracks may not map.
+### Common Issues
+
+**"Invalid or expired token"**
+- Check browser cookies
+- Ensure frontend origin matches CORS settings in `config.py`
+- Re-authenticate via `/auth/login`
+
+**Database connection errors**
+- Verify PostgreSQL is running
+- Check `app/.env` credentials
+- Ensure database exists: `createdb graph_recomendation`
+
+**pgvector extension not found**
+- Install extension: `CREATE EXTENSION IF NOT EXISTS vector;`
+- Check PostgreSQL version (16+ recommended)
+
+**Deezer API empty results**
+- Some tracks may not exist in Deezer catalog
+- System automatically skips and continues processing
 
 ---
 
-# Graph recomendation (Español)
+## Performance
 
-Backend para analizar playlists de Spotify y construir un **grafo de similitud entre canciones** combinando:
+**Typical analysis times** (100-song playlist):
 
-- OAuth con Spotify (Spotipy)
-- Enriquecimiento con Deezer (rank/BPM/gain/géneros)
-- **Concurrencia** (asyncio + aiohttp)
-- **Caching** en PostgreSQL (canciones/álbumes/géneros)
-- Respuesta **streaming** (NDJSON) para ver progreso por lotes
+| Scenario | Time | Cache Hit Rate |
+|----------|------|----------------|
+| 100% cached | ~1-2s | 100% |
+| 50% cached | ~15-20s | 50% |
+| 0% cached | ~30-40s | 0% |
 
----
-
-## Quickstart
-
-1) Levanta PostgreSQL y crea las tablas (ver [db/schema.sql](db/schema.sql)).
-2) Crea `app/.env` (ver plantilla en la sección Configuración).
-3) Instala dependencias y ejecuta:
-
-```bash
-python -m venv .venv
-# Windows
-.\.venv\Scripts\activate
-
-pip install -r requirements.txt
-python run.py
-```
-
-4) Verifica que está vivo:
-
-```bash
-curl http://127.0.0.1:8000/
-```
+**Optimizations**:
+- Producer-consumer: ~2-3x faster first batch
+- UMAP fit-once: ~90% reduction in overhead
+- PostgreSQL cache: ~100ms for 100+ embeddings
 
 ---
 
-## Estado actual (branches)
+## Contributing
 
-- `main`: pipeline completo de **ingesta + caché + grafo + embeddings de géneros**. Usa **pgvector** (extensión de PostgreSQL) para almacenar embeddings y calcular similitud por coseno.
-- `feature/embedding-songs`: **embeddings de canciones** (vectores de 128 dimensiones). Autoencoder entrenado con PyTorch que combina features de audio + embeddings de géneros. Incluye reducción dimensional con **UMAP** (128D → 2D) para visualización en frontend.
-- `refactor/producer-consumer-pipeline`: **Arquitectura productor-consumidor** con `asyncio.Queue`. Procesamiento **paralelo** de API calls y consultas a DB. Mejora significativa de rendimiento (~2-3x más rápido). 
+Contributions welcome! Please:
 
----
-
-## ¿Qué hace el backend?
-
-1) El usuario hace login con Spotify.
-2) El backend lista playlists y permite seleccionar una.
-3) Para esa playlist:
-   - Trae tracks desde Spotify.
-   - Consulta PostgreSQL para reutilizar datos ya cacheados.
-   - Para lo no cacheado, consulta Deezer concurrentemente:
-     - búsqueda (`/search`) para mapear a IDs de Deezer
-     - track (`/track/{id}`) para `rank`, `bpm`, `gain`
-     - álbum (`/album/{id}`) para géneros (si no estaban cacheados)
-   - Guarda en PostgreSQL (canciones, álbumes, géneros).
-4) Genera **embeddings de canciones de 128 dimensiones** usando un autoencoder PyTorch que combina:
-   - Features de audio: BPM, gain, duración, popularidad, explicit, rank
-   - Features de álbum: tipo, número de tracks, año de lanzamiento
-   - **Embeddings ponderados de géneros** (128D del álbum)
-5) Reduce dimensionalidad con **UMAP** (128D → 2D) para visualización interactiva en el frontend.
-6) Devuelve la salida en **streaming NDJSON** por lotes con coordenadas 2D (x, y) de cada canción para renderizado progresivo.
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit changes (`git commit -m 'Add amazing feature'`)
+4. Push to branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
 ---
 
-## API (FastAPI)
+## License
 
-- `GET /` health check
-- `GET /login` inicia OAuth (o indica si ya estás logueado)
-- `GET /callback` callback OAuth, guarda sesión y redirige al frontend
-- `GET /playlists` lista playlists del usuario
-- `POST /logout` cierra sesión
-- `GET /analizePlaylist?id=<playlist_id>` stream de análisis en NDJSON
-
-### Respuesta de `/analizePlaylist` (NDJSON)
-
-La respuesta es una secuencia de líneas JSON (una por línea). Cada lote contiene un array de canciones con sus coordenadas 2D para visualización:
-
-```json
-[
-  {
-    "id": "<spotify_id>",
-    "x": 0.245,
-    "y": -0.832,
-    "song_name": "Track A",
-    "artists": ["Artist 1", "Artist 2"],
-    "album_name": "Album Name"
-  },
-  {
-    "id": "<spotify_id>",
-    "x": 1.123,
-    "y": 0.456,
-    "song_name": "Track B",
-    "artists": ["Artist 3"],
-    "album_name": "Another Album"
-  }
-]
-```
-
-**Notas sobre las coordenadas (x, y):**
-- Generadas mediante **UMAP** (reducción de 128D → 2D) cada 3 batches o en el último lote
-- Representan similitud semántica: canciones cercanas son más similares
-- `null` cuando no se han calculado en ese batch específico
-
-Al final se emite:
-
-```json
-{"done": true}
-```
+This project is licensed under the MIT License - see the LICENSE file for details.
 
 ---
 
-## Frontend
+## Related Projects
 
-Este backend está pensado para consumirse desde un frontend web. Puedes encontrarlo aqui:
-
-- https://github.com/saulish/Graph-Recomendation-Frontend
-
----
-
-## Requisitos
-
-- Python 3.10+ (recomendado 3.11)
-- PostgreSQL 13+
-- Credenciales de Spotify Developer (Client ID/Secret)
+- **Frontend**: https://github.com/saulish/Graph-Recomendation-Frontend
+- **Documentation**: https://github.com/saulish/GR_back/tree/main/docs
+- **pgvector**: https://github.com/pgvector/pgvector
 
 ---
 
-## Configuración (variables de entorno)
+## Support
 
-Este proyecto usa un archivo `app/.env` (ignorado por git). Crea uno con estas variables:
+For detailed documentation, see the `docs/` folder:
 
-- `SPOTIFY_API_KEY`
-- `SPOTIFY_API_SECRET`
-- `FRONT_PORT`
-- `BACK_PORT`
-- `POSTGRES_HOST`
-- `POSTGRES_PORT`
-- `POSTGRES_DB`
-- `POSTGRES_USER`
-- `POSTGRES_PASSWORD`
+- [Architecture Documentation](docs/architecture.md)
+- [Embeddings Technical Details](docs/embeddings.md)
+- [API Reference](docs/api-reference.md)
+- [Database Schema](docs/database.md)
 
-Plantilla sugerida para `app/.env`:
-
-```dotenv
-SPOTIFY_API_KEY=<tu_spotify_client_id>
-SPOTIFY_API_SECRET=<tu_spotify_client_secret>
-
-FRONT_PORT=5500
-BACK_PORT=8000
-
-POSTGRES_HOST=127.0.0.1
-POSTGRES_PORT=5432
-POSTGRES_DB=graph_recomendation
-POSTGRES_USER=<usuario>
-POSTGRES_PASSWORD=<password>
-
-```
-
-### Configuración de rendimiento (config.py)
-
-El sistema tiene constantes configurables para procesamiento por lotes y optimización de UMAP:
-
-```python
-BATCH_SIZE = 20               # Canciones procesadas por lote (llamadas API)
-MIN_UMAP_SIZE = 3             # Ejecutar UMAP cada N lotes
-MIN_UMAP_BATCH_SIZE = 60      # Mínimo de canciones acumuladas para ejecutar UMAP
-MIN_FIT_SONGS = 40            # Mínimo de canciones cacheadas para entrenar reducer UMAP
-MAX_QUEUE_SIZE = 5            # Tamaño máximo del buffer de queue (control de backpressure)
-```
-
-**Recomendaciones de ajuste:**
-- **Aumentar `BATCH_SIZE`** (ej., 30-50) para procesamiento más rápido con más llamadas API concurrentes (requiere más memoria)
-- **Disminuir `MIN_UMAP_SIZE`** (ej., 2) para actualizaciones 2D más frecuentes en el frontend (mayor uso de CPU)
-- **`MIN_UMAP_BATCH_SIZE`** típicamente debe ser `BATCH_SIZE * MIN_UMAP_SIZE`
-- **`MIN_FIT_SONGS`** controla cuándo UMAP se entrena desde el cache (menor = entrenamiento inicial más rápido, mayor = mejor calidad del reducer)
-- **`MAX_QUEUE_SIZE`** previene desbordamiento de memoria con consumidores lentos (menor = más backpressure, mayor = más buffering)
+Questions? Open an issue on GitHub!
 
 ---
 
-## Instalación
-
-Instala dependencias con `requirements.txt`:
-
-```bash
-python -m venv .venv
-# Windows
-.\.venv\Scripts\activate
-
-pip install -r requirements.txt
-```
-
----
-
-## Base de datos
-
-El schema está basado en el dump adjunto `gr_schema.sql`. Para conveniencia, hay una versión portable en [db/schema.sql](db/schema.sql).
-
-Tablas principales:
-
-- `albums` — metadata de álbumes (BPM, gain, fecha de lanzamiento, etc.)
-- `songs_data` — tracks de Spotify cacheados con enriquecimiento de Deezer + **embeddings de 128D** y versión del modelo
-- `genres` — catálogo de géneros con **embeddings de 128 dimensiones** (vía pgvector)
-- `album_genres` — relación **muchos-a-muchos** (álbum ↔ géneros) para joins optimizados
-- `artists` (presente en el schema; no se usa activamente aún)
-
-Notas:
-
-- `albums.genres_id` se almacena como JSONB (array de IDs de género) para compatibilidad hacia atrás.
-- **Tabla `album_genres`** (muchos-a-muchos) se usa ahora para joins eficientes con `genres` (incluidos embeddings).
-- **Extensión pgvector** está instalada en PostgreSQL. Las tablas `genres` y `songs_data` tienen columnas `vector(128)` para embeddings.
-- **Cache de embeddings**: `songs_data.embedding` almacena vectores pre-calculados para evitar regeneración en subsecuentes análisis.
-- `embedding_ver` rastrea la versión del modelo para invalidar cache cuando el modelo se actualiza.
-
----
-
-## Ejecutar (dev)
-
-La forma principal de ejecutar el backend es con `run.py` (ya invoca Uvicorn):
-
-```bash
-python run.py
-```
-
-Por defecto, el callback redirige a `http://127.0.0.1:<FRONT_PORT>/menu.html`.
-
-CORS:
-- Se permite el origen `http://127.0.0.1:<FRONT_PORT>`.
-
----
-
-## Arquitectura (resumen)
-
-![Diagrama de arquitectura](docs/architecture_esp.svg)
-
----
-
-## Embeddings de géneros y pgvector
-
-El sistema utiliza **embeddings de géneros de 128 dimensiones** para calcular la similitud semántica entre álbumes basándose en sus géneros musicales. Esto permite al motor de recomendación entender relaciones entre géneros más allá de simples coincidencias exactas.
-
-**Detalles clave de implementación:**
-
-1. **Almacenamiento vectorial**: La tabla `genres` incluye una columna `embedding` de tipo `vector(128)` utilizando la **extensión pgvector de PostgreSQL**.
-
-2. **Relaciones muchos-a-muchos**: La tabla `album_genres` vincula álbumes con múltiples géneros (un álbum puede tener varios géneros, un género puede pertenecer a muchos álbumes).
-
-3. **Similitud coseno en SQL**: La función `consult_cosine_similarity(album_id_1, album_id_2)` calcula el **vector de embedding promedio** de todos los géneros de cada álbum, luego calcula la similitud coseno usando el operador `<=>` de pgvector:
-   ```sql
-   SELECT 1 - (avg_emb_1 <=> avg_emb_2) AS cosine_similarity
-   ```
-
-4. **Pesos del grafo**: En `graph.py`, la función `compareSongs()` llama a `consult_cosine_similarity()` y añade el resultado a los pesos de las aristas:
-   ```python
-   embeddings_diff = conn.consult_cosine_similarity(album_id_1, album_id_2)
-   w += int((embeddings_diff + 0.5) * w)
-   ```
-
-5. **Beneficios**: Este enfoque permite al sistema entender que "jazz" y "blues" están semánticamente más cerca que "jazz" y "death metal", mejorando la calidad de las recomendaciones al aprovechar embeddings de géneros pre-entrenados.
-
-**Configuración de pgvector:**
-- Requiere PostgreSQL 16+ con la extensión pgvector compilada para tu plataforma (hay builds disponibles para Windows).
-- Ver `db/schema.sql` para el schema completo incluyendo índices optimizados para operaciones vectoriales.
-
----
-
-## Embeddings de canciones (autoencoder + UMAP)
-
-El sistema genera **embeddings de 128 dimensiones por canción** usando un autoencoder neuronal entrenado con PyTorch, combinando features de audio con embeddings de géneros para capturar similitud multidimensional.
-
-**Arquitectura del modelo:**
-
-- **Input**: 137 dimensiones
-  - 9 features numéricas: rank, popularity, duration, BPM, gain, album_type, number_songs, explicit, release_year
-  - 128 dimensiones de embeddings de géneros (promedio ponderado × 2.0 para canciones con géneros)
-  
-- **Encoder**: 4 capas densas con LeakyReLU, BatchNorm, Dropout
-  - 137 → 256 → 256 → 128 → **64 (embedding final)**
-  
-- **Decoder**: simétrico para reconstrucción (64 → 128 → 256 → 256 → 137)
-
-**Preprocesamiento:**
-- StandardScaler para normalización de features numéricas
-- Imputación de valores faltantes (especialmente BPM)
-- Peso diferencial para canciones sin géneros (embedding × 0.1 vs × 2.0)
-
-**Reducción dimensional con UMAP:**
-```python
-reducer = umap.UMAP(
-    n_components=2,
-    n_neighbors=15,
-    min_dist=0.1,
-    metric="cosine",
-    random_state=42
-)
-embeddings_2D = reducer.fit_transform(embeddings_128D)
-```
-
-**Optimización de rendimiento:**
-- **UMAP entrenado solo una vez**: Después del fit inicial, solo se llama `transform()` (~10-50x más rápido)
-- Mínimo de `MIN_FIT_SONGS` (40) canciones cacheadas requeridas para entrenar el reducer
-- Embeddings 2D generados cada 3 batches o cuando el batch acumula ≥60 canciones
-- Buffer acumula embeddings 128D para transformación agregada
-- Usa `asyncio.to_thread()` para evitar bloquear el event loop
-
-**Cache en PostgreSQL:**
-- Columna `songs_data.embedding` (vector 128D) almacena embeddings pre-calculados
-- `embedding_ver` invalida cache cuando el modelo se actualiza
-- Canciones cacheadas generan embeddings 2D inmediatamente en el primer batch
-
-**Beneficios:**
-- Visualización interactiva en 2D donde la distancia representa similitud semántica
-- Captura relaciones no lineales entre features de audio y géneros
-- Cache persistente acelera análisis subsecuentes de la misma playlist
-
-**Casos especiales en reducción UMAP:**
-```python
-# Manejo de edge cases
-if n == 0: return np.empty((0, 2))
-if n == 1: return np.array([[0.0, 0.0]])
-if n == 2: return np.array([[-1.0, 0.0], [1.0, 0.0]])
-```
-- UMAP requiere n ≥ 3 para funcionar correctamente
-- Casos con 0, 1 o 2 canciones retornan coordenadas predefinidas
-- Evita errores y garantiza respuesta consistente
-
----
-
-## Arquitectura productor-consumidor (asyncio)
-
-El sistema implementa un **patrón productor-consumidor** usando `asyncio.Queue` para maximizar throughput y procesamiento paralelo.
-
-**Flujo de procesamiento:**
-
-```
-┌─────────────────┐         ┌──────────────┐
-│ cache_producer  │────────▶│              │
-│  (DB queries)   │         │ asyncio.Queue│◀───┐
-└─────────────────┘         │              │    │
-                            └──────┬───────┘    │
-┌─────────────────┐                │            │
-│  api_producer   │────────────────┘            │
-│ (Spotify/Deezer)│                             │
-└─────────────────┘                             │
-                                                │
-                            ┌──────────────┐    │
-                            │ consumer_main│────┘
-                            │  (Frontend)  │
-                            └──────────────┘
-```
-
-**Componentes:**
-
-1. **`cache_producer`** (Productor 1):
-   - Consulta PostgreSQL para canciones cacheadas
-   - Genera embeddings 2D con UMAP
-   - Pone payload en la queue
-   - Ejecuta **una sola vez** al inicio
-
-2. **`api_producer`** (Productor 2):
-   - Procesa canciones no cacheadas en batches (default: 20)
-   - Llama APIs de Spotify/Deezer concurrentemente
-   - Genera embeddings 128D y reduce a 2D cada N batches
-   - Pone payloads en la queue progresivamente
-
-3. **`consumer_main`** (Consumidor):
-   - Lee de la queue con timeout (0.5s)
-   - Hace `yield` al frontend vía StreamingResponse
-   - Monitorea estado de ambos productores
-   - Termina cuando ambos productores finalizan
-
-**Ventajas de rendimiento:**
-
-- **Paralelismo real**: DB y API se ejecutan simultáneamente (no secuencialmente)
-- **Latencia reducida**: Frontend recibe primer batch ~2-3x más rápido
-- **Throughput maximizado**: Aprovecha tiempo de I/O de APIs mientras procesa cache
-- **Backpressure automático**: Queue buffer previene sobrecarga de memoria
-
-**Configuración (config.py):**
-```python
-BATCH_SIZE = 20              # Canciones por batch de API
-MIN_UMAP_SIZE = 3            # Cada cuántos batches ejecutar UMAP
-MIN_UMAP_BATCH_SIZE = 60     # Mínimo de canciones para ejecutar UMAP
-MIN_FIT_SONGS = 40           # Mínimo de canciones cacheadas para entrenar UMAP
-MAX_QUEUE_SIZE = 5           # Límite de tamaño del buffer de queue
-```
-
-**Sincronización:**
-```python
-while producers > 0:
-    batch = await asyncio.wait_for(queue.get(), timeout=0.5)
-    yield (json.dumps(batch) + "\n").encode("utf-8")
-    
-    if cache_task and cache_task.done():
-        producers -= 1
-    if api_task and api_task.done():
-        producers -= 1
-```
-
-**Optimización UMAP (mejora crítica de rendimiento):**
-
-El sistema ahora **entrena UMAP solo UNA VEZ** y reutiliza el reducer entrenado para todas las transformaciones subsecuentes:
-
-1. **Decisión de entrenamiento** (`cache_producer`):
-   - Entrena si 100% de canciones están cacheadas (`full_cache=True`)
-   - O entrena si el cache tiene ≥ `MIN_FIT_SONGS` (40) canciones
-   - El entrenamiento usa `fit_transform()`
-
-2. **Transformaciones subsecuentes** (`api_producer`):
-   - Después del entrenamiento inicial, solo llama `transform()` en nuevos embeddings
-   - Verifica flag `model.umap_fitted` para evitar reentrenamiento
-   - **~10-50x más rápido** que reentrenar cada batch
-
-3. **Reducer persistente**:
-   ```python
-   # Primera vez (entrenamiento)
-   self.umap_reducer.fit_transform(embeddings)  # Lento
-   self.umap_fitted = True
-   
-   # Todas las llamadas subsecuentes (solo transformación)
-   self.umap_reducer.transform(new_embeddings)  # ¡Rápido!
-   ```
-
-**Impacto de rendimiento:**
-- **Comportamiento antiguo**: UMAP entrenado cada `MIN_UMAP_BATCH_SIZE` (60) canciones (~2-3s por entrenamiento)
-- **Comportamiento nuevo**: UMAP entrenado **una vez**, luego solo transform (~0.1-0.2s por transformación)
-- **Resultado**: ~90% de reducción en overhead de UMAP para playlists grandes
-
----
-
-## Notas de diseño (por qué así)
-
-- **Arquitectura productor-consumidor**: Dos productores independientes (`cache_producer` y `api_producer`) alimentan una `asyncio.Queue`. El consumidor (`consumer_main`) procesa batches concurrentemente y los envía al frontend.
-- **Concurrencia real**: Las consultas a DB y las llamadas a API (Spotify/Deezer) se ejecutan **en paralelo**, maximizando throughput.
-- **Streaming NDJSON**: permite UI/cliente progresivo; el frontend recibe datos inmediatamente sin esperar el procesamiento completo.
-- **Buffer de embeddings**: acumula embeddings 128D para transformaciones UMAP agregadas, reduciendo overhead computacional.
-
----
-
-## Notas y comportamiento en casos reales
-
-- Spotify: pueden aparecer items no procesables (p. ej. podcasts/episodes, tracks eliminados, metadata incompleta). Se filtran/descartan cuando aplica.
-- Deezer: algunas búsquedas no devuelven resultados o devuelven payload incompleto; esas canciones se ignoran para no bloquear el pipeline.
-- Performance: el análisis se hace por **batches** (por defecto 20 canciones) y con concurrencia controlada para aprovechar al máximo la API sin saturarla.
-
-### Estrategia de caché (lo importante)
-
-- Se cachean **canciones completas** (`songs_data`) y **álbumes** (`albums`) para evitar llamadas redundantes.
-- Si varias canciones pertenecen al mismo álbum, se detecta el duplicado y se evita pedir/guardar el álbum más de una vez.
-- Los géneros se guardan en `genres` y se enlazan desde `albums.genres_id` (JSONB) para reconstrucción rápida.
-
----
-
-## Roadmap
-
-### ✅ Completado
-- ✅ Integrar embeddings de géneros (vectores de 128 dimensiones)
-- ✅ Persistir embeddings en Postgres con `pgvector`
-- ✅ **Embeddings de canciones** (autoencoder PyTorch con 128D)
-- ✅ **Reducción dimensional con UMAP** (128D → 2D) para visualización
-- ✅ **Cache de embeddings** en PostgreSQL con versionado de modelo
-- ✅ **Arquitectura productor-consumidor** con `asyncio.Queue` para procesamiento paralelo
-
-### 🔨 En Progreso / Planeado
-
-**Fase 1: Calidad de Código & Arquitectura**
-- Refactorización de endpoints (convenciones RESTful, mejor manejo de errores, validación)
-- Sistema de logging estructurado (logs JSON estructurados, niveles de log, trazabilidad de requests)
-- Suite de testing (pruebas unitarias, pruebas de integración, pruebas de endpoints)
-
-**Fase 2: Escalabilidad & Rendimiento**
-- Redis para sesiones/tokens de usuario (PostgreSQL maneja embeddings eficientemente ~100ms para 100+ embeddings)
-- Optimización de concurrencia multi-usuario (connection pooling, queue de requests, rate limiting)
-
-**Fase 3: Features Core**
-- **Sistema de recomendación de canciones** (similitud coseno sobre embeddings vía pgvector, recomendaciones personalizadas, filtrado colaborativo)
-- Endpoints de API de recomendación (canciones similares, generación de playlists, modo descubrimiento)
-
-**Fase 4: Infraestructura**
-- Containerización con Docker (multi-stage builds, docker-compose para dev/prod)
-- Pipeline CI/CD (testing automatizado, workflows de deployment, health checks)
-
----
-
-## Troubleshooting
-
-- `invalid token` en endpoints: revisa cookies/sesión y que el frontend esté en el origen permitido por CORS.
-- Errores de DB: verifica que el schema existe y que las credenciales en `app/.env` apuntan a la misma DB.
-- Deezer devuelve resultados vacíos: el search depende del texto `"track + artists"`; algunas canciones pueden no mapear.
+*Built with FastAPI, PyTorch, PostgreSQL*
 
